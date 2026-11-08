@@ -1,0 +1,18 @@
+# Beispiel für MAIL_TRIAGE_ACCOUNTS (Standard: ~/mail-triage/accounts.yaml).
+# Nur Platzhalter, keine echten Daten. Passwörter stehen NICHT hier,
+# sondern im macOS-Schlüsselbund (Dienst "mail-triage/<id>").
+
+# Optional, kommagetrennt. Wird von der Umgebungsvariable
+# MAIL_TRIAGE_BLOCKED_FOLDERS überschrieben. Standard: Sicherheit
+blocked_folders: Sicherheit
+
+accounts:
+  - id: privat                  # [a-z0-9-]+
+    host: imap.example.net
+    port: 993                   # optional, Standard 993
+    user: erste.adresse@example.de
+    secure: true                # optional, Standard true
+
+  - id: projekt-2
+    host: imap.example.net
+    user: zweite.adresse@example.de

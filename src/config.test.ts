@@ -103,3 +103,14 @@ describe("helpers", () => {
     expect(passwordEnvName("privat-1")).toBe("MAIL_TRIAGE_PASS_PRIVAT_1");
   });
 });
+
+describe("accounts.example.yaml", () => {
+  it("is a valid config", async () => {
+    const { readFileSync } = await import("node:fs");
+    const cfg = loadConfig({ MAIL_TRIAGE_ACCOUNTS: "/example" }, () =>
+      readFileSync(new URL("../accounts.example.yaml", import.meta.url), "utf8")
+    );
+    expect(cfg.accounts.map((a) => a.id)).toEqual(["privat", "projekt-2"]);
+    expect(cfg.blockedFolders).toEqual(["Sicherheit"]);
+  });
+});

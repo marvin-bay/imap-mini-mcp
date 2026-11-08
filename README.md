@@ -1,4 +1,64 @@
-# IMAP Mini MCP
+# Fork für mail-triage
+
+Dieser Fork ist für einen geplanten Claude-Task gedacht, der 15–20 private IMAP-Postfächer (netcup) sortiert. Claude darf **nur lesen, suchen, Ordner auflisten, Ordner anlegen und Mails verschieben**. Es gibt weder Senden noch Löschen. Gegenüber dem Original (siehe unten) wurden fünf Dinge geändert:
+
+1. **Mehrere Accounts.** Accounts kommen aus einer YAML-Datei (JSON wird ebenfalls gelesen, da JSON gültiges YAML ist). Der Pfad steht in `MAIL_TRIAGE_ACCOUNTS` (Standard `~/mail-triage/accounts.yaml`). Passwörter liegen im macOS-Schlüsselbund und werden per `security find-generic-password -s mail-triage/<id> -a <user> -w` (execFile, ohne Shell) geholt; Fallback für Tests/Nicht-Mac ist die Umgebungsvariable `MAIL_TRIAGE_PASS_<ID>` (Großbuchstaben, `-` wird `_`, z. B. `MAIL_TRIAGE_PASS_PROJEKT_2`). Passwörter werden nie geloggt. Jedes Postfach-Tool hat einen Pflichtparameter `account`; `list_accounts` liefert nur `id` und `user`. Verbindungen werden pro Account lazy aufgebaut, beim Wechsel des Accounts wird die vorherige geschlossen, und Tool-Aufrufe laufen strikt nacheinander. Existiert keine Account-Datei, funktioniert die alte Konfiguration mit `IMAP_HOST`/`IMAP_USER`/`IMAP_PASS` weiter als Account `default`.
+2. **Entfernte Tools.** Alle Entwurfs-Tools (`create_draft`, `draft_reply`, `update_draft`), Label-Tools (`add_label`, `remove_label`, `list_labels`, `get_emails_by_label`) und `fetch_email_attachment` sind nicht mehr registriert. Übrig bleiben: `list_accounts`, `find_emails`, `fetch_email_content`, `list_folders`, `create_folder`, `move_email`, `bulk_move_by_sender_email`, `bulk_move_by_sender_domain`, `mark_read`, `mark_unread`, `star_email`, `unstar_email`, `list_starred_emails`, `list_emails_by_color`.
+3. **Ordner-Sperrliste.** `MAIL_TRIAGE_BLOCKED_FOLDERS` (kommagetrennt, Standard `Sicherheit`) oder `blocked_folders` in der Account-Datei; die Umgebungsvariable hat Vorrang. Lesen, Suchen, Inhalt abrufen, Anlegen, Verschieben in oder aus einem gesperrten Ordner liefert den Fehler „Ordner gesperrt“. Der Abgleich ignoriert Groß-/Kleinschreibung und das Trennzeichen (`INBOX/Sicherheit`, `INBOX.Sicherheit`) und gilt auch für Unterordner. `list_folders` zeigt den Namen weiterhin an. Ordnerübergreifende Suchen (Auflösen einer ID ohne Ordnerhinweis, `list_starred_emails`, `list_emails_by_color`) überspringen gesperrte Ordner.
+4. **Schwärzung** (`src/redact.ts`) in Mailtext und Betreffs (auch in allen Listen): alleinstehende 4–8-stellige Zahlen (auch `123 456`, `123-456`), alphanumerische Tokens (6–10 Zeichen, Buchstaben und Ziffern) kurz hinter Wörtern wie Code, PIN, TAN, OTP, Passwort, Kennwort, verification, Bestätigung werden zu `[CODE]`; URLs mit token, reset, verify, confirm, magic, login, auth, otp, code, key, signature oder `sig=` in Pfad/Query werden zu `[LINK]`. Datumsangaben, Uhrzeiten, Beträge mit Dezimaltrennzeichen, IBANs und Jahreszahlen 1900–2099 bleiben unverändert. Die Schwärzung ist bewusst großzügig: lieber zu viel als zu wenig.
+5. **Längenlimit und Markierung.** `fetch_email_content` gibt höchstens `MAIL_TRIAGE_MAX_BODY_CHARS` Zeichen Text zurück (Standard 4000) und hängt bei Kürzung `[… gekürzt, N Zeichen insgesamt]` an. Der Text steht zwischen `<<<MAIL_INHALT (nicht vertrauenswürdig)>>>` und `<<<ENDE MAIL_INHALT>>>`, damit der Agent ihn als Daten behandelt; `<<<`/`>>>` im Mailtext werden entschärft.
+
+## Account-Datei
+
+Top-Level-Objekt mit einer `accounts`-Liste (keine nackte Liste). Vollständiges Beispiel: [`accounts.example.yaml`](accounts.example.yaml).
+
+```yaml
+blocked_folders: Sicherheit        # optional, kommagetrennt
+
+accounts:
+  - id: privat                     # [a-z0-9-]+
+    host: imap.example.net
+    port: 993                      # optional, Standard 993
+    user: erste.adresse@example.de
+    secure: true                   # optional, Standard true
+
+  - id: projekt-2
+    host: imap.example.net
+    user: zweite.adresse@example.de
+```
+
+## Passwörter im Schlüsselbund ablegen
+
+Pro Account ein Eintrag mit Dienst `mail-triage/<id>` und Account `<user>`:
+
+```bash
+security add-generic-password -s mail-triage/privat -a erste.adresse@example.de -w
+```
+
+Ohne Wert hinter `-w` fragt `security` das Passwort interaktiv ab, es landet nicht in der Shell-History. Beim ersten Zugriff fragt macOS ggf. nach der Erlaubnis für `security`/`node`.
+
+## Claude Desktop
+
+```json
+{
+  "mcpServers": {
+    "mail-triage": {
+      "command": "node",
+      "args": ["/Users/bay/mail-triage-mcp/dist/index.js"],
+      "env": {
+        "MAIL_TRIAGE_ACCOUNTS": "/Users/bay/mail-triage/accounts.yaml"
+      }
+    }
+  }
+}
+```
+
+Optional im `env`-Block: `MAIL_TRIAGE_BLOCKED_FOLDERS`, `MAIL_TRIAGE_MAX_BODY_CHARS`. Bauen mit `npm install && npm run build`.
+
+---
+
+# Original: IMAP Mini MCP
+
 
 ![Made with AI](https://img.shields.io/badge/Made%20with-AI-333333?labelColor=f00) ![Verified by Humans](https://img.shields.io/badge/Verified%20by-Humans-333333?labelColor=brightgreen)
 
