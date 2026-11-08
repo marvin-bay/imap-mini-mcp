@@ -10,29 +10,20 @@ import type { ImapClient } from "../imap/index.js";
 import type { ToolEnvironment } from "../accounts.js";
 import {
   fetchEmailContent,
-  fetchEmailAttachment,
   listFolders,
   createFolder,
   moveEmail,
   folderExists,
   bulkMoveBySender,
-  createDraft,
-  updateDraft,
   starEmail,
   unstarEmail,
   markRead,
   markUnread,
   listAllStarredEmails,
   listAllEmailsByColor,
-  findDraftsFolder,
   resolveEmailId,
-  resolveInMailbox,
-  parseCompositeId,
   findEmails,
   parseTimeParam,
-  addLabel,
-  removeLabel,
-  listLabels,
 } from "../imap/index.js";
 
 // ---------------------------------------------------------------------------
@@ -194,8 +185,8 @@ const registry: ToolRegistration[] = [
     description:
       "Fetch the full content of a single email by its id. " +
       "Returns {id, subject, from, to, date, body, attachments}. " +
-      "The attachments array contains metadata only (id, filename, contentType, size) — " +
-      "use fetch_email_attachment to download actual attachment data. " +
+      "The attachments array contains metadata only (id, filename, contentType, size); " +
+      "attachment contents cannot be downloaded. " +
       "Use an id obtained from any of the list_emails_* tools.",
     inputSchema: {
       type: "object",
@@ -221,54 +212,6 @@ const registry: ToolRegistration[] = [
         return errorResult(`No email found for id "${id}".`);
 
       return jsonResult(email);
-    },
-  },
-
-  {
-    name: "fetch_email_attachment",
-    description:
-      "Download a specific attachment from an email. " +
-      "Requires the email id and the attachment id (obtained from fetch_email_content). " +
-      "Returns {id, filename, contentType, size, contentBase64} where contentBase64 is the " +
-      "base64-encoded file content.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        id: {
-          type: "string",
-          description: "The email identifier from list results.",
-        },
-        attachment_id: {
-          type: "string",
-          description:
-            "The attachment identifier from fetch_email_content results.",
-        },
-        ...MAILBOX_HINT_SCHEMA,
-      },
-      required: ["account", "id", "attachment_id"],
-    },
-    handler: async (imapClient, args) => {
-      const id = args.id as string;
-      const attachmentId = args.attachment_id as string;
-      const mailboxHint = args.mailbox as string | undefined;
-
-      if (!id || !attachmentId)
-        return errorResult("Error: id and attachment_id are required.");
-
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
-      const attachment = await fetchEmailAttachment(
-        imapClient,
-        uid,
-        attachmentId,
-        mailbox
-      );
-      if (!attachment)
-        return errorResult(
-          `No attachment "${attachmentId}" found for email "${id}".`
-        );
-
-      return jsonResult(attachment);
     },
   },
 
@@ -364,144 +307,6 @@ const registry: ToolRegistration[] = [
     },
   },
 
-  {
-    name: "create_draft",
-    description:
-      "Create a new email draft in the Drafts folder. " +
-      "Returns {id, subject, to, date} of the created draft. " +
-      "Optionally set in_reply_to with an email id to create a threaded reply draft " +
-      "(sets In-Reply-To and References headers automatically).",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        to: {
-          type: "string",
-          description: "Recipient email address.",
-        },
-        subject: {
-          type: "string",
-          description: "Email subject line.",
-        },
-        body: {
-          type: "string",
-          description: "Plain text email body.",
-        },
-        cc: {
-          type: "string",
-          description: "CC recipient(s).",
-        },
-        bcc: {
-          type: "string",
-          description: "BCC recipient(s).",
-        },
-        in_reply_to: {
-          type: "string",
-          description:
-            "ID of the email being replied to (for threading). " +
-            "Automatically sets In-Reply-To and References headers.",
-        },
-      },
-      required: ["account", "to", "subject", "body"],
-    },
-    handler: async (imapClient, args) => {
-      const to = args.to as string;
-      const subject = args.subject as string;
-      const body = args.body as string;
-
-      if (!to || !subject || !body)
-        return errorResult("Error: to, subject, and body are required.");
-
-      const sender = process.env.IMAP_USER || "";
-      const result = await createDraft(imapClient, sender, {
-        to,
-        subject,
-        body,
-        cc: args.cc as string | undefined,
-        bcc: args.bcc as string | undefined,
-        inReplyTo: args.in_reply_to as string | undefined,
-      });
-      return jsonResult(result);
-    },
-  },
-
-  {
-    name: "draft_reply",
-    description:
-      "Create a reply draft to an existing email. " +
-      "Automatically derives recipient, subject (Re: prefix), and threading headers " +
-      "from the original email. Set reply_all to true to include original recipients as CC. " +
-      "Returns {id, subject, to, date} of the created draft.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        id: {
-          type: "string",
-          description: "ID of the email to reply to.",
-        },
-        body: {
-          type: "string",
-          description: "Plain text reply body.",
-        },
-        reply_all: {
-          type: "boolean",
-          description:
-            "Include original To/CC recipients as CC (default: false).",
-        },
-        ...MAILBOX_HINT_SCHEMA,
-      },
-      required: ["account", "id", "body"],
-    },
-    handler: async (imapClient, args) => {
-      const id = args.id as string;
-      const body = args.body as string;
-      const replyAll = (args.reply_all as boolean) || false;
-      const mailboxHint = args.mailbox as string | undefined;
-
-      if (!id || !body)
-        return errorResult("Error: id and body are required.");
-
-      // Resolve composite ID to UID + mailbox
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
-
-      // Fetch the original email to derive fields
-      const original = await fetchEmailContent(imapClient, uid, mailbox);
-      if (!original)
-        return errorResult(`Email not found for id "${id}".`);
-
-      // Derive "to" from original sender
-      const to = original.from;
-
-      // Derive subject with Re: prefix (avoid double Re:)
-      const subject = original.subject.startsWith("Re: ")
-        ? original.subject
-        : `Re: ${original.subject}`;
-
-      // Derive CC for reply-all: original to + cc, minus current user
-      let cc: string | undefined;
-      if (replyAll) {
-        const currentUser = (process.env.IMAP_USER || "").toLowerCase();
-        const allRecipients = original.to
-          .split(",")
-          .map((addr) => addr.trim())
-          .filter((addr) => addr.toLowerCase() !== currentUser && addr !== "");
-        if (allRecipients.length > 0) {
-          cc = allRecipients.join(", ");
-        }
-      }
-
-      const sender = process.env.IMAP_USER || "";
-      const result = await createDraft(imapClient, sender, {
-        to,
-        subject,
-        body,
-        cc,
-        inReplyTo: id,
-      });
-      return jsonResult(result);
-    },
-  },
 
   {
     name: "star_email",
@@ -668,85 +473,6 @@ const registry: ToolRegistration[] = [
   },
 
   {
-    name: "update_draft",
-    description:
-      "Replace an existing draft with new content. " +
-      "The id must refer to an email in the Drafts folder — " +
-      "this tool cannot modify emails in other folders. " +
-      "Returns {id, subject, to, date} of the updated draft.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        id: {
-          type: "string",
-          description: "ID of the existing draft to replace.",
-        },
-        to: {
-          type: "string",
-          description: "Recipient email address.",
-        },
-        subject: {
-          type: "string",
-          description: "Email subject line.",
-        },
-        body: {
-          type: "string",
-          description: "Plain text email body.",
-        },
-        cc: {
-          type: "string",
-          description: "CC recipient(s).",
-        },
-        bcc: {
-          type: "string",
-          description: "BCC recipient(s).",
-        },
-        in_reply_to: {
-          type: "string",
-          description:
-            "ID of the email being replied to (for threading).",
-        },
-      },
-      required: ["account", "id", "to", "subject", "body"],
-    },
-    handler: async (imapClient, args) => {
-      const id = args.id as string;
-      const to = args.to as string;
-      const subject = args.subject as string;
-      const body = args.body as string;
-
-      if (!id || !to || !subject || !body)
-        return errorResult(
-          "Error: id, to, subject, and body are required."
-        );
-
-      // Resolve in Drafts folder specifically
-      const draftsFolder = await findDraftsFolder(imapClient);
-      const uid = await resolveInMailbox(
-        imapClient,
-        parseCompositeId(id).messageId,
-        draftsFolder
-      );
-      if (!uid)
-        return errorResult(
-          "Draft not found. The id must refer to an email in the Drafts folder."
-        );
-
-      const sender = process.env.IMAP_USER || "";
-      const result = await updateDraft(imapClient, sender, uid, {
-        to,
-        subject,
-        body,
-        cc: args.cc as string | undefined,
-        bcc: args.bcc as string | undefined,
-        inReplyTo: args.in_reply_to as string | undefined,
-      });
-      return jsonResult(result);
-    },
-  },
-
-  {
     name: "bulk_move_by_sender_email",
     description:
       "Move all emails from a specific sender email address in a source folder to a destination folder. " +
@@ -872,149 +598,8 @@ const registry: ToolRegistration[] = [
     },
   },
 
-  {
-    name: "add_label",
-    description:
-      "Add a label to an email. Labels are tags that appear alongside the email " +
-      "(not folders — the email stays in its current folder). " +
-      "Requires the email's id and the label name. " +
-      "Returns {id, label, labelPath}.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        id: {
-          type: "string",
-          description: "The email identifier from list results.",
-        },
-        label: {
-          type: "string",
-          description: "Label name to add (e.g. \"Work\", \"Important\").",
-        },
-        source_folder: {
-          type: "string",
-          description:
-            "Optional folder hint for where the email currently lives. " +
-            "If omitted, searches all folders.",
-        },
-      },
-      required: ["account", "id", "label"],
-    },
-    handler: async (imapClient, args) => {
-      const id = args.id as string;
-      const label = args.label as string;
-      const sourceFolder = args.source_folder as string | undefined;
 
-      if (!id || !label)
-        return errorResult("Error: id and label are required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, sourceFolder);
-      const result = await addLabel(imapClient, uid, mailbox, label);
-      return jsonResult({ id, label, labelPath: result.labelPath });
-    },
-  },
-
-  {
-    name: "remove_label",
-    description:
-      "Remove a label from an email. " +
-      "Requires the email's id and the label name. " +
-      "Returns {id, label, removed: true}.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        id: {
-          type: "string",
-          description: "The email identifier from list results.",
-        },
-        label: {
-          type: "string",
-          description: "Label name to remove (e.g. \"Work\", \"Important\").",
-        },
-      },
-      required: ["account", "id", "label"],
-    },
-    handler: async (imapClient, args) => {
-      const id = args.id as string;
-      const label = args.label as string;
-
-      if (!id || !label)
-        return errorResult("Error: id and label are required.");
-
-      // Parse the composite ID to get the Message-ID
-      const { messageId } = parseCompositeId(id);
-      const labelPath = `Labels/${label}`;
-
-      // Find the email UID within the label folder
-      const uidInLabel = await resolveInMailbox(imapClient, messageId, labelPath);
-      if (!uidInLabel) {
-        return errorResult(
-          `Email not found under label "${label}". It may not have this label applied.`
-        );
-      }
-
-      await removeLabel(imapClient, uidInLabel, label);
-      return jsonResult({ id, label, removed: true });
-    },
-  },
-
-  {
-    name: "list_labels",
-    description:
-      "List all labels (Proton Mail tags) in the account. " +
-      "Returns an array of {path, name, delimiter} objects. " +
-      "Use the path value (e.g. \"Labels/Work\") as the folder parameter in other tools.",
-    inputSchema: {
-      type: "object",
-      properties: { ...ACCOUNT_SCHEMA },
-      required: ["account"],
-    },
-    handler: async (imapClient) => {
-      const labels = await listLabels(imapClient);
-      return jsonResult({ count: labels.length, labels });
-    },
-  },
-
-  {
-    name: "get_emails_by_label",
-    description:
-      "Get emails that have a specific label. " +
-      "Returns the most recent emails with that label (default 50, max 200). " +
-      "Returns an array of {id, subject, from, date} objects sorted newest-first.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        ...ACCOUNT_SCHEMA,
-        label: {
-          type: "string",
-          description: "Label name (e.g. \"Work\", \"Important\").",
-        },
-        limit: {
-          type: "number",
-          description:
-            "Maximum number of results to return (newest first). Default 50, max 200.",
-        },
-      },
-      required: ["account", "label"],
-    },
-    handler: async (imapClient, args) => {
-      const label = args.label as string;
-      if (!label) return errorResult("Error: label is required.");
-
-      const limit = (args.limit as number) || FIND_EMAILS_DEFAULT_LIMIT;
-      const clampedLimit = Math.min(
-        Math.max(1, limit),
-        FIND_EMAILS_MAX_LIMIT
-      );
-
-      const emails = await findEmails(imapClient, {
-        folder: `Labels/${label}`,
-        limit: clampedLimit,
-      });
-      return jsonResult({ count: emails.length, emails });
-    },
-  },
 ];
 
 // ---------------------------------------------------------------------------

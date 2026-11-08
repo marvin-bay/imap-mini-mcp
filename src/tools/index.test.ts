@@ -14,24 +14,17 @@ vi.mock("../imap/index.js", async () => {
   return {
     ...actual,
     fetchEmailContent: vi.fn(),
-    fetchEmailAttachment: vi.fn(),
     listFolders: vi.fn(),
     createFolder: vi.fn(),
     moveEmail: vi.fn(),
     folderExists: vi.fn(),
     bulkMoveBySender: vi.fn(),
-    createDraft: vi.fn(),
-    updateDraft: vi.fn(),
     starEmail: vi.fn(),
     unstarEmail: vi.fn(),
     listStarredEmails: vi.fn(),
-    findDraftsFolder: vi.fn(),
     resolveEmailId: vi.fn(),
     resolveInMailbox: vi.fn(),
     findEmails: vi.fn(),
-    addLabel: vi.fn(),
-    removeLabel: vi.fn(),
-    listLabels: vi.fn(),
     listAllEmailsByColor: vi.fn(),
     listAllStarredEmails: vi.fn(),
     markRead: vi.fn(),
@@ -41,24 +34,17 @@ vi.mock("../imap/index.js", async () => {
 
 import {
   fetchEmailContent,
-  fetchEmailAttachment,
   listFolders,
   createFolder,
   moveEmail,
   folderExists,
   bulkMoveBySender,
-  createDraft,
-  updateDraft,
   starEmail,
   unstarEmail,
   listStarredEmails,
-  findDraftsFolder,
   resolveEmailId,
   resolveInMailbox,
   findEmails,
-  addLabel,
-  removeLabel,
-  listLabels,
   listAllEmailsByColor,
   listAllStarredEmails,
   markRead,
@@ -66,24 +52,17 @@ import {
 } from "../imap/index.js";
 
 const mockFetchContent = vi.mocked(fetchEmailContent);
-const mockFetchAttachment = vi.mocked(fetchEmailAttachment);
 const mockListFolders = vi.mocked(listFolders);
 const mockCreateFolder = vi.mocked(createFolder);
 const mockMoveEmail = vi.mocked(moveEmail);
 const mockFolderExists = vi.mocked(folderExists);
 const mockBulkMoveBySender = vi.mocked(bulkMoveBySender);
-const mockCreateDraft = vi.mocked(createDraft);
-const mockUpdateDraft = vi.mocked(updateDraft);
 const mockStarEmail = vi.mocked(starEmail);
 const mockUnstarEmail = vi.mocked(unstarEmail);
 const mockListStarredEmails = vi.mocked(listStarredEmails);
-const mockFindDraftsFolder = vi.mocked(findDraftsFolder);
 const mockResolveEmailId = vi.mocked(resolveEmailId);
 const mockResolveInMailbox = vi.mocked(resolveInMailbox);
 const mockFindEmails = vi.mocked(findEmails);
-const mockAddLabel = vi.mocked(addLabel);
-const mockRemoveLabel = vi.mocked(removeLabel);
-const mockListLabels = vi.mocked(listLabels);
 const mockListAllEmailsByColor = vi.mocked(listAllEmailsByColor);
 const mockListAllStarredEmails = vi.mocked(listAllStarredEmails);
 const mockMarkRead = vi.mocked(markRead);
@@ -109,8 +88,8 @@ const TEST_ID = "2026-02-01T10:00:00.<msg@example.com>";
 // ---------------------------------------------------------------------------
 
 describe("tool definitions", () => {
-  it("exposes exactly 22 tools", () => {
-    expect(tools).toHaveLength(22);
+  it("exposes exactly 14 tools", () => {
+    expect(tools).toHaveLength(14);
   });
 
   it("has the expected tool names", () => {
@@ -119,26 +98,32 @@ describe("tool definitions", () => {
       "list_accounts",
       "find_emails",
       "fetch_email_content",
-      "fetch_email_attachment",
       "list_folders",
       "create_folder",
       "move_email",
-      "create_draft",
-      "draft_reply",
       "star_email",
       "unstar_email",
       "mark_read",
       "mark_unread",
       "list_starred_emails",
       "list_emails_by_color",
-      "update_draft",
       "bulk_move_by_sender_email",
       "bulk_move_by_sender_domain",
-      "add_label",
-      "remove_label",
-      "list_labels",
-      "get_emails_by_label",
     ]);
+  });
+
+  it.each([
+    "fetch_email_attachment", "create_draft", "draft_reply", "update_draft",
+    "add_label", "remove_label", "list_labels", "get_emails_by_label",
+  ])("does not expose %s", async (name) => {
+    expect(tools.map((t) => t.name)).not.toContain(name);
+    const result = await call(name);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Unknown tool");
+  });
+
+  it("exposes no send, delete or draft capability", () => {
+    for (const t of tools) expect(t.name).not.toMatch(/(^|_)(send|delete|expunge)(_|$)|draft|label|attachment/i);
   });
 
   it("fetch_email_content requires id", () => {
@@ -146,11 +131,6 @@ describe("tool definitions", () => {
     expect(tool.inputSchema.required).toContain("id");
   });
 
-  it("fetch_email_attachment requires id and attachment_id", () => {
-    const tool = tools.find((t) => t.name === "fetch_email_attachment")!;
-    expect(tool.inputSchema.required).toContain("id");
-    expect(tool.inputSchema.required).toContain("attachment_id");
-  });
 });
 
 // ---------------------------------------------------------------------------
@@ -200,53 +180,6 @@ describe("handleToolCall — fetch_email_content", () => {
     expect(parsed.id).toBe(TEST_ID);
     expect(parsed.body).toBe("Hello world");
     expect(parsed.attachments).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — fetch_email_attachment
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — fetch_email_attachment", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns error when id or attachment_id is missing", async () => {
-    const result = await call("fetch_email_attachment",
-      { id: TEST_ID }
-    );
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("returns error when attachment not found", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 1, mailbox: "INBOX" });
-    mockFetchAttachment.mockResolvedValue(null);
-    const result = await call("fetch_email_attachment",
-      { id: TEST_ID, attachment_id: "nope" }
-    );
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("No attachment");
-  });
-
-  it("returns attachment data as JSON", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 10, mailbox: "INBOX" });
-    mockFetchAttachment.mockResolvedValue({
-      id: "att-0",
-      filename: "data.csv",
-      contentType: "text/csv",
-      contentBase64: "bmFtZSx2YWx1ZQ==",
-      size: 42,
-    });
-
-    const result = await call("fetch_email_attachment",
-      { id: TEST_ID, attachment_id: "att-0" }
-    );
-    expect(result.isError).toBeUndefined();
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.filename).toBe("data.csv");
-    expect(parsed.contentBase64).toBeTruthy();
   });
 });
 
@@ -358,292 +291,6 @@ describe("handleToolCall — move_email", () => {
 });
 
 // ---------------------------------------------------------------------------
-// handleToolCall — create_draft
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — create_draft", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubEnv("IMAP_USER", "me@test.com");
-  });
-
-  it("returns error when required fields are missing", async () => {
-    const result = await call("create_draft", {
-      to: "recipient@test.com",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("calls createDraft with correct arguments", async () => {
-    mockCreateDraft.mockResolvedValue({
-      id: TEST_ID,
-      subject: "Test",
-      to: "recipient@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    const result = await call("create_draft", {
-      to: "recipient@test.com",
-      subject: "Test",
-      body: "Hello",
-      cc: "cc@test.com",
-    });
-
-    expect(mockCreateDraft).toHaveBeenCalledWith(mockImapClient, "me@test.com", {
-      to: "recipient@test.com",
-      subject: "Test",
-      body: "Hello",
-      cc: "cc@test.com",
-      bcc: undefined,
-      inReplyTo: undefined,
-    });
-
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.id).toBe(TEST_ID);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — draft_reply
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — draft_reply", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubEnv("IMAP_USER", "me@test.com");
-  });
-
-  it("returns error when id or body is missing", async () => {
-    const result = await call("draft_reply", {
-      id: TEST_ID,
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("returns error when original email not found", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 999, mailbox: "INBOX" });
-    mockFetchContent.mockResolvedValue(null);
-    const result = await call("draft_reply", {
-      id: TEST_ID,
-      body: "Reply text",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("not found");
-  });
-
-  it("derives to and subject from original email", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 100, mailbox: "INBOX" });
-    mockFetchContent.mockResolvedValue({
-      id: TEST_ID,
-      subject: "Original Subject",
-      from: "sender@test.com",
-      to: "me@test.com",
-      date: "2026-02-10T00:00:00.000Z",
-      body: "Original body",
-      attachments: [],
-    });
-    mockCreateDraft.mockResolvedValue({
-      id: "2026-02-11T00:00:00.<reply@test.com>",
-      subject: "Re: Original Subject",
-      to: "sender@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    await call("draft_reply", {
-      id: TEST_ID,
-      body: "My reply",
-    });
-
-    expect(mockCreateDraft).toHaveBeenCalledWith(
-      mockImapClient,
-      "me@test.com",
-      expect.objectContaining({
-        to: "sender@test.com",
-        subject: "Re: Original Subject",
-        body: "My reply",
-        inReplyTo: TEST_ID,
-      })
-    );
-  });
-
-  it("does not double-prefix Re: on subject", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 100, mailbox: "INBOX" });
-    mockFetchContent.mockResolvedValue({
-      id: TEST_ID,
-      subject: "Re: Already Replied",
-      from: "sender@test.com",
-      to: "me@test.com",
-      date: "2026-02-10T00:00:00.000Z",
-      body: "Body",
-      attachments: [],
-    });
-    mockCreateDraft.mockResolvedValue({
-      id: "2026-02-11T00:00:00.<reply@test.com>",
-      subject: "Re: Already Replied",
-      to: "sender@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    await call("draft_reply", {
-      id: TEST_ID,
-      body: "Reply",
-    });
-
-    expect(mockCreateDraft).toHaveBeenCalledWith(
-      mockImapClient,
-      "me@test.com",
-      expect.objectContaining({
-        subject: "Re: Already Replied",
-      })
-    );
-  });
-
-  it("includes original recipients as CC when reply_all is true", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 100, mailbox: "INBOX" });
-    mockFetchContent.mockResolvedValue({
-      id: TEST_ID,
-      subject: "Group Thread",
-      from: "sender@test.com",
-      to: "me@test.com, other@test.com",
-      date: "2026-02-10T00:00:00.000Z",
-      body: "Body",
-      attachments: [],
-    });
-    mockCreateDraft.mockResolvedValue({
-      id: "2026-02-11T00:00:00.<reply@test.com>",
-      subject: "Re: Group Thread",
-      to: "sender@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    await call("draft_reply", {
-      id: TEST_ID,
-      body: "Reply to all",
-      reply_all: true,
-    });
-
-    expect(mockCreateDraft).toHaveBeenCalledWith(
-      mockImapClient,
-      "me@test.com",
-      expect.objectContaining({
-        cc: "other@test.com",
-      })
-    );
-  });
-
-  it("excludes current user from CC in reply_all", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 100, mailbox: "INBOX" });
-    mockFetchContent.mockResolvedValue({
-      id: TEST_ID,
-      subject: "Thread",
-      from: "sender@test.com",
-      to: "me@test.com",
-      date: "2026-02-10T00:00:00.000Z",
-      body: "Body",
-      attachments: [],
-    });
-    mockCreateDraft.mockResolvedValue({
-      id: "2026-02-11T00:00:00.<reply@test.com>",
-      subject: "Re: Thread",
-      to: "sender@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    await call("draft_reply", {
-      id: TEST_ID,
-      body: "Reply",
-      reply_all: true,
-    });
-
-    // CC should be undefined since the only recipient was the current user
-    expect(mockCreateDraft).toHaveBeenCalledWith(
-      mockImapClient,
-      "me@test.com",
-      expect.objectContaining({
-        cc: undefined,
-      })
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — update_draft
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — update_draft", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    vi.stubEnv("IMAP_USER", "me@test.com");
-  });
-
-  it("returns error when required fields are missing", async () => {
-    const result = await call("update_draft", {
-      id: TEST_ID,
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("resolves ID in Drafts folder and calls updateDraft", async () => {
-    mockFindDraftsFolder.mockResolvedValue("Drafts");
-    mockResolveInMailbox.mockResolvedValue(400);
-    mockUpdateDraft.mockResolvedValue({
-      id: "2026-02-11T00:00:00.<new-draft@test.com>",
-      subject: "Updated",
-      to: "recipient@test.com",
-      date: "2026-02-11T00:00:00.000Z",
-    });
-
-    const result = await call("update_draft", {
-      id: TEST_ID,
-      to: "recipient@test.com",
-      subject: "Updated",
-      body: "New content",
-    });
-
-    expect(mockFindDraftsFolder).toHaveBeenCalledWith(mockImapClient);
-    expect(mockResolveInMailbox).toHaveBeenCalledWith(
-      mockImapClient,
-      "<msg@example.com>",
-      "Drafts"
-    );
-    expect(mockUpdateDraft).toHaveBeenCalledWith(
-      mockImapClient,
-      "me@test.com",
-      400,
-      {
-        to: "recipient@test.com",
-        subject: "Updated",
-        body: "New content",
-        cc: undefined,
-        bcc: undefined,
-        inReplyTo: undefined,
-      }
-    );
-
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.id).toBe("2026-02-11T00:00:00.<new-draft@test.com>");
-  });
-
-  it("returns error when draft not found in Drafts folder", async () => {
-    mockFindDraftsFolder.mockResolvedValue("Drafts");
-    mockResolveInMailbox.mockResolvedValue(null);
-
-    const result = await call("update_draft", {
-      id: TEST_ID,
-      to: "recipient@test.com",
-      subject: "Updated",
-      body: "New content",
-    });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("Draft not found");
-  });
-});
-
-// ---------------------------------------------------------------------------
 // handleToolCall — star_email / unstar_email
 // ---------------------------------------------------------------------------
 
@@ -688,50 +335,6 @@ describe("handleToolCall — unstar_email", () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.id).toBe(TEST_ID);
     expect(parsed.starred).toBe(false);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Tool metadata — draft tools
-// ---------------------------------------------------------------------------
-
-describe("tool definitions — draft tools", () => {
-  it("create_draft requires to, subject, and body", () => {
-    const tool = tools.find((t) => t.name === "create_draft")!;
-    expect(tool.inputSchema.required).toContain("to");
-    expect(tool.inputSchema.required).toContain("subject");
-    expect(tool.inputSchema.required).toContain("body");
-  });
-
-  it("draft_reply requires id and body", () => {
-    const tool = tools.find((t) => t.name === "draft_reply")!;
-    expect(tool.inputSchema.required).toContain("id");
-    expect(tool.inputSchema.required).toContain("body");
-  });
-
-  it("update_draft requires id, to, subject, and body", () => {
-    const tool = tools.find((t) => t.name === "update_draft")!;
-    expect(tool.inputSchema.required).toContain("id");
-    expect(tool.inputSchema.required).toContain("to");
-    expect(tool.inputSchema.required).toContain("subject");
-    expect(tool.inputSchema.required).toContain("body");
-  });
-
-  it("add_label requires id and label", () => {
-    const tool = tools.find((t) => t.name === "add_label")!;
-    expect(tool.inputSchema.required).toContain("id");
-    expect(tool.inputSchema.required).toContain("label");
-  });
-
-  it("remove_label requires id and label", () => {
-    const tool = tools.find((t) => t.name === "remove_label")!;
-    expect(tool.inputSchema.required).toContain("id");
-    expect(tool.inputSchema.required).toContain("label");
-  });
-
-  it("list_labels has no required parameters", () => {
-    const tool = tools.find((t) => t.name === "list_labels")!;
-    expect(tool.inputSchema.required).toEqual(["account"]);
   });
 });
 
@@ -1001,230 +604,6 @@ describe("handleToolCall — find_emails", () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.count).toBe(1);
     expect(parsed.emails[0].subject).toBe("Hello");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — add_label
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — add_label", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns error when id is missing", async () => {
-    const result = await call("add_label", {
-      label: "Work",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("returns error when label is missing", async () => {
-    const result = await call("add_label", {
-      id: TEST_ID,
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("resolves ID, adds label, and returns id + label + labelPath", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
-    mockAddLabel.mockResolvedValue({ labelPath: "Labels/Work" });
-
-    const result = await call("add_label", {
-      id: TEST_ID,
-      label: "Work",
-    });
-
-    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, undefined);
-    expect(mockAddLabel).toHaveBeenCalledWith(mockImapClient, 42, "INBOX", "Work");
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.id).toBe(TEST_ID);
-    expect(parsed.label).toBe("Work");
-    expect(parsed.labelPath).toBe("Labels/Work");
-  });
-
-  it("passes source_folder as hint to resolveEmailId", async () => {
-    mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
-    mockAddLabel.mockResolvedValue({ labelPath: "Labels/Work" });
-
-    await call("add_label", {
-      id: TEST_ID,
-      label: "Work",
-      source_folder: "INBOX",
-    });
-
-    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "INBOX");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — remove_label
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — remove_label", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns error when id is missing", async () => {
-    const result = await call("remove_label", {
-      label: "Work",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("returns error when label is missing", async () => {
-    const result = await call("remove_label", {
-      id: TEST_ID,
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("required");
-  });
-
-  it("returns error when email not found in label folder", async () => {
-    mockResolveInMailbox.mockResolvedValue(null);
-
-    const result = await call("remove_label", {
-      id: TEST_ID,
-      label: "Work",
-    });
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("not found");
-  });
-
-  it("resolves ID in label folder and removes label", async () => {
-    mockResolveInMailbox.mockResolvedValue(55);
-
-    const result = await call("remove_label", {
-      id: TEST_ID,
-      label: "Work",
-    });
-
-    expect(mockResolveInMailbox).toHaveBeenCalledWith(
-      mockImapClient,
-      "<msg@example.com>",
-      "Labels/Work"
-    );
-    expect(mockRemoveLabel).toHaveBeenCalledWith(mockImapClient, 55, "Work");
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.id).toBe(TEST_ID);
-    expect(parsed.label).toBe("Work");
-    expect(parsed.removed).toBe(true);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — list_labels
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — list_labels", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("returns label list as JSON", async () => {
-    mockListLabels.mockResolvedValue([
-      { path: "Labels/Work", name: "Work", delimiter: "/" },
-      { path: "Labels/Important", name: "Important", delimiter: "/" },
-    ]);
-
-    const result = await call("list_labels", {});
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.count).toBe(2);
-    expect(parsed.labels[0].path).toBe("Labels/Work");
-    expect(parsed.labels[1].name).toBe("Important");
-  });
-
-  it("returns empty array when no labels exist", async () => {
-    mockListLabels.mockResolvedValue([]);
-
-    const result = await call("list_labels", {});
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.count).toBe(0);
-    expect(parsed.labels).toEqual([]);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// handleToolCall — get_emails_by_label
-// ---------------------------------------------------------------------------
-
-describe("handleToolCall — get_emails_by_label", () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
-
-  it("requires label", () => {
-    const tool = tools.find((t) => t.name === "get_emails_by_label")!;
-    expect(tool.inputSchema.required).toEqual(["account", "label"]);
-  });
-
-  it("returns an error when label is empty", async () => {
-    const result = await call("get_emails_by_label", {
-      label: "",
-    });
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain("label is required");
-    expect(mockFindEmails).not.toHaveBeenCalled();
-  });
-
-  it("searches the Labels/<name> folder with the default limit", async () => {
-    mockFindEmails.mockResolvedValue([]);
-
-    await call("get_emails_by_label", {
-      label: "Work",
-    });
-
-    expect(mockFindEmails).toHaveBeenCalledWith(mockImapClient, {
-      folder: "Labels/Work",
-      limit: 50,
-    });
-  });
-
-  it("clamps an oversized limit to the maximum", async () => {
-    mockFindEmails.mockResolvedValue([]);
-
-    await call("get_emails_by_label", {
-      label: "Work",
-      limit: 5000,
-    });
-
-    expect(mockFindEmails.mock.calls[0][1].limit).toBe(200);
-  });
-
-  it("raises a non-positive limit to 1", async () => {
-    mockFindEmails.mockResolvedValue([]);
-
-    await call("get_emails_by_label", {
-      label: "Work",
-      limit: -5,
-    });
-
-    expect(mockFindEmails.mock.calls[0][1].limit).toBe(1);
-  });
-
-  it("returns count and emails as JSON", async () => {
-    mockFindEmails.mockResolvedValue([
-      {
-        id: TEST_ID,
-        subject: "Quarterly plan",
-        from: "boss@example.com",
-        date: "2026-02-01T10:00:00.000Z",
-      },
-    ]);
-
-    const result = await call("get_emails_by_label", {
-      label: "Work",
-    });
-
-    const parsed = JSON.parse(result.content[0].text);
-    expect(parsed.count).toBe(1);
-    expect(parsed.emails[0].subject).toBe("Quarterly plan");
   });
 });
 
