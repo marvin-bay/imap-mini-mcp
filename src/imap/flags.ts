@@ -1,6 +1,7 @@
 // ABOUTME: IMAP flag operations: star/unstar emails and list starred emails.
 // ABOUTME: Supports both standard \Flagged and macOS Apple Mail $MailFlagBit* keywords.
 
+import { isBlockedFolder } from "../blocked.js";
 import type { ImapClient } from "./client.js";
 import type { EmailEntry } from "./types.js";
 import { extractEmailAddress } from "./search.js";
@@ -225,12 +226,14 @@ export async function listEmailsByColor(
  */
 export async function listAllEmailsByColor(
   imapClient: ImapClient,
-  color?: string
+  color?: string,
+  blockedFolders: readonly string[] = []
 ): Promise<ColoredFolderGroup[]> {
   const folders = await listFolders(imapClient);
   const groups: ColoredFolderGroup[] = [];
 
   for (const folder of folders) {
+    if (isBlockedFolder(folder.path, blockedFolders)) continue;
     const emails = await listEmailsByColor(imapClient, folder.path, color);
     if (emails.length > 0) {
       groups.push({ folder: folder.path, count: emails.length, emails });
@@ -247,12 +250,14 @@ export async function listAllEmailsByColor(
  * emails sorted newest-first within each group.
  */
 export async function listAllStarredEmails(
-  imapClient: ImapClient
+  imapClient: ImapClient,
+  blockedFolders: readonly string[] = []
 ): Promise<StarredFolderGroup[]> {
   const folders = await listFolders(imapClient);
   const groups: StarredFolderGroup[] = [];
 
   for (const folder of folders) {
+    if (isBlockedFolder(folder.path, blockedFolders)) continue;
     const emails = await listStarredEmails(imapClient, folder.path);
     if (emails.length > 0) {
       groups.push({ folder: folder.path, count: emails.length, emails });

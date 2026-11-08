@@ -285,7 +285,8 @@ describe("handleToolCall — move_email", () => {
     expect(mockResolveEmailId).toHaveBeenCalledWith(
       mockImapClient,
       TEST_ID,
-      "Sent"
+      "Sent",
+      ["Sicherheit"]
     );
   });
 });
@@ -636,7 +637,7 @@ describe("handleToolCall — list_emails_by_color", () => {
 
     await call("list_emails_by_color", {});
 
-    expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, undefined);
+    expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, undefined, ["Sicherheit"]);
   });
 
   it("passes the color filter through", async () => {
@@ -644,7 +645,7 @@ describe("handleToolCall — list_emails_by_color", () => {
 
     await call("list_emails_by_color", { color: "red" });
 
-    expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, "red");
+    expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, "red", ["Sicherheit"]);
   });
 
   it("returns totalCount summed across folders plus the folder groups", async () => {
@@ -712,7 +713,7 @@ describe("handleToolCall — mark_read", () => {
 
     await call("mark_read", { id: TEST_ID, mailbox: "Archive" });
 
-    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive");
+    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive", ["Sicherheit"]);
     expect(mockMarkRead).toHaveBeenCalledWith(mockImapClient, 7, "Archive");
   });
 });
@@ -746,7 +747,7 @@ describe("handleToolCall — mark_unread", () => {
 
     await call("mark_unread", { id: TEST_ID, mailbox: "Archive" });
 
-    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive");
+    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive", ["Sicherheit"]);
     expect(mockMarkUnread).toHaveBeenCalledWith(mockImapClient, 7, "Archive");
   });
 });
@@ -840,6 +841,91 @@ describe("handleToolCall — accounts", () => {
     release();
     await Promise.all([a, b]);
     expect(order).toEqual(["first-start", "first-end", "second-start"]);
+  });
+});
+
+describe("handleToolCall — blocked folders", () => {
+  const BLOCKED = "Ordner gesperrt";
+
+  async function expectBlocked(name: string, args: Record<string, unknown>) {
+    const result = await call(name, args);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toBe(BLOCKED);
+  }
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveEmailId.mockResolvedValue({ uid: 1, mailbox: "INBOX" });
+  });
+
+  it("find_emails refuses blocked folders (any spelling)", async () => {
+    for (const folder of ["Sicherheit", "INBOX/Sicherheit", "INBOX.sicherheit"]) {
+      await expectBlocked("find_emails", { folder });
+    }
+    expect(mockFindEmails).not.toHaveBeenCalled();
+  });
+
+  it("fetch_email_content refuses a blocked mailbox hint", async () => {
+    await expectBlocked("fetch_email_content", { id: TEST_ID, mailbox: "INBOX.Sicherheit" });
+    expect(mockFetchContent).not.toHaveBeenCalled();
+  });
+
+  it("refuses when an unhinted id resolves into a blocked folder", async () => {
+    mockResolveEmailId.mockResolvedValue({ uid: 1, mailbox: "INBOX/Sicherheit" });
+    await expectBlocked("fetch_email_content", { id: TEST_ID });
+    expect(mockFetchContent).not.toHaveBeenCalled();
+    await expectBlocked("move_email", { id: TEST_ID, destination_folder: "Archive" });
+    expect(mockMoveEmail).not.toHaveBeenCalled();
+  });
+
+  it("passes the denylist to the id resolver so searches skip blocked folders", async () => {
+    mockFetchContent.mockResolvedValue(null);
+    await call("fetch_email_content", { id: TEST_ID });
+    expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, undefined, ["Sicherheit"]);
+  });
+
+  it("move_email refuses blocked source and destination", async () => {
+    await expectBlocked("move_email", { id: TEST_ID, source_folder: "Sicherheit", destination_folder: "Archive" });
+    await expectBlocked("move_email", { id: TEST_ID, destination_folder: "INBOX/Sicherheit" });
+    expect(mockMoveEmail).not.toHaveBeenCalled();
+  });
+
+  it("bulk moves refuse blocked source and destination", async () => {
+    for (const [tool, extra] of [
+      ["bulk_move_by_sender_email", { sender: "a@b.de" }],
+      ["bulk_move_by_sender_domain", { domain: "b.de" }],
+    ] as const) {
+      await expectBlocked(tool, { ...extra, source_folder: "Sicherheit", destination_folder: "Archive" });
+      await expectBlocked(tool, { ...extra, source_folder: "INBOX", destination_folder: "INBOX.Sicherheit" });
+    }
+    expect(mockBulkMoveBySender).not.toHaveBeenCalled();
+  });
+
+  it("create_folder refuses blocked names", async () => {
+    await expectBlocked("create_folder", { path: "INBOX/Sicherheit" });
+    expect(mockCreateFolder).not.toHaveBeenCalled();
+  });
+
+  it.each(["star_email", "unstar_email", "mark_read", "mark_unread"])(
+    "%s refuses a blocked mailbox hint",
+    async (name) => {
+      await expectBlocked(name, { id: TEST_ID, mailbox: "Sicherheit" });
+    }
+  );
+
+  it("list_folders still shows the blocked folder", async () => {
+    mockListFolders.mockResolvedValue([
+      { path: "Sicherheit", name: "Sicherheit", delimiter: "/" },
+    ]);
+    const result = await call("list_folders");
+    expect(result.isError).toBeUndefined();
+    expect(result.content[0].text).toContain("Sicherheit");
+  });
+
+  it("allows normal folders", async () => {
+    mockFindEmails.mockResolvedValue([]);
+    const result = await call("find_emails", { folder: "INBOX/Rechnungen" });
+    expect(result.isError).toBeUndefined();
   });
 });
 

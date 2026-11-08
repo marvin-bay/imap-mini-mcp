@@ -199,3 +199,28 @@ describe("resolveEmailId", () => {
     ).rejects.toThrow("Email not found");
   });
 });
+
+describe("resolveEmailId with blocked folders", () => {
+  it("never opens blocked folders, neither as hint nor in the scan", async () => {
+    const opened: string[] = [];
+    const client = {
+      openMailbox: vi.fn(async (m: string) => {
+        opened.push(m);
+        return { release: vi.fn() };
+      }),
+      getClient: () => ({ search: vi.fn().mockResolvedValue([]) }),
+      connect: vi.fn().mockResolvedValue({
+        list: vi.fn().mockResolvedValue([
+          { path: "INBOX", name: "INBOX", delimiter: "/" },
+          { path: "INBOX.Sicherheit", name: "Sicherheit", delimiter: "." },
+          { path: "Archiv", name: "Archiv", delimiter: "." },
+        ]),
+      }),
+    } as unknown as ImapClient;
+
+    await expect(
+      resolveEmailId(client, "2026-01-01T00:00:00.<x@y>", "Sicherheit", ["Sicherheit"])
+    ).rejects.toThrow(/not found/);
+    expect(opened).toEqual(["INBOX", "Archiv"]);
+  });
+});

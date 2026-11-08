@@ -730,3 +730,29 @@ describe("listAllEmailsByColor", () => {
     expect(result).toEqual([]);
   });
 });
+
+describe("blocked folders in cross-folder listings", () => {
+  function emptyClient() {
+    const openMailbox = vi.fn(async () => ({ release: vi.fn() }));
+    const client = {
+      openMailbox,
+      getClient: () => ({ search: vi.fn().mockResolvedValue([]) }),
+    } as unknown as ImapClient;
+    return { client, openMailbox };
+  }
+
+  it("listAllStarredEmails and listAllEmailsByColor skip blocked folders", async () => {
+    mockListFolders.mockResolvedValue([
+      { path: "INBOX", name: "INBOX", delimiter: "." },
+      { path: "INBOX.Sicherheit", name: "Sicherheit", delimiter: "." },
+    ]);
+    for (const fn of [
+      (c: ImapClient) => listAllStarredEmails(c, ["Sicherheit"]),
+      (c: ImapClient) => listAllEmailsByColor(c, undefined, ["Sicherheit"]),
+    ]) {
+      const { client, openMailbox } = emptyClient();
+      await fn(client);
+      expect(openMailbox.mock.calls.map((c) => (c as unknown[])[0])).toEqual(["INBOX"]);
+    }
+  });
+});

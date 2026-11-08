@@ -8,6 +8,7 @@
 
 import type { ImapClient } from "../imap/index.js";
 import type { ToolEnvironment } from "../accounts.js";
+import { BLOCKED_MESSAGE, isBlockedFolder } from "../blocked.js";
 import {
   fetchEmailContent,
   listFolders,
@@ -62,6 +63,19 @@ function jsonResult(data: unknown): ToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
   };
+}
+
+class BlockedFolderError extends Error {
+  constructor() {
+    super(BLOCKED_MESSAGE);
+  }
+}
+
+/** Throws (reported as "Ordner gesperrt") if any given folder is on the denylist. */
+function assertAllowed(env: ToolEnvironment, ...folders: (string | undefined)[]) {
+  for (const f of folders) {
+    if (f && isBlockedFolder(f, env.blockedFolders)) throw new BlockedFolderError();
+  }
 }
 
 function errorResult(message: string): ToolResult {
@@ -147,7 +161,7 @@ const registry: ToolRegistration[] = [
       },
       required: ["account"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const opts: any = {
         folder: (args.folder as string) || "INBOX",
       };
@@ -175,6 +189,7 @@ const registry: ToolRegistration[] = [
         opts.limit = FIND_EMAILS_DEFAULT_LIMIT;
       }
 
+      assertAllowed(env, opts.folder);
       const emails = await findEmails(imapClient, opts);
       return jsonResult({ count: emails.length, emails });
     },
@@ -200,13 +215,20 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const mailboxHint = args.mailbox as string | undefined;
 
       if (!id) return errorResult("Error: id is required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
+      assertAllowed(env, mailboxHint);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        mailboxHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
       const email = await fetchEmailContent(imapClient, uid, mailbox);
       if (!email)
         return errorResult(`No email found for id "${id}".`);
@@ -226,7 +248,7 @@ const registry: ToolRegistration[] = [
       properties: { ...ACCOUNT_SCHEMA },
       required: ["account"],
     },
-    handler: async (imapClient) => {
+    handler: async (imapClient, _args, env) => {
       const folders = await listFolders(imapClient);
       return jsonResult({ count: folders.length, folders });
     },
@@ -250,10 +272,11 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "path"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const path = args.path as string;
       if (!path) return errorResult("Error: path is required.");
 
+      assertAllowed(env, path);
       const created = await createFolder(imapClient, path);
       return jsonResult({ created });
     },
@@ -286,7 +309,7 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id", "destination_folder"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const sourceHint = args.source_folder as string | undefined;
       const destinationFolder = args.destination_folder as string;
@@ -296,7 +319,15 @@ const registry: ToolRegistration[] = [
           "Error: id and destination_folder are required."
         );
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, sourceHint);
+      assertAllowed(env, sourceHint, destinationFolder);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        sourceHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
+      assertAllowed(env, destinationFolder);
       const result = await moveEmail(
         imapClient,
         uid,
@@ -326,13 +357,20 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const mailboxHint = args.mailbox as string | undefined;
 
       if (!id) return errorResult("Error: id is required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
+      assertAllowed(env, mailboxHint);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        mailboxHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
       await starEmail(imapClient, uid, mailbox);
       return jsonResult({ id, starred: true });
     },
@@ -356,13 +394,20 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const mailboxHint = args.mailbox as string | undefined;
 
       if (!id) return errorResult("Error: id is required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
+      assertAllowed(env, mailboxHint);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        mailboxHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
       await unstarEmail(imapClient, uid, mailbox);
       return jsonResult({ id, starred: false });
     },
@@ -386,13 +431,20 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const mailboxHint = args.mailbox as string | undefined;
 
       if (!id) return errorResult("Error: id is required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
+      assertAllowed(env, mailboxHint);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        mailboxHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
       await markRead(imapClient, uid, mailbox);
       return jsonResult({ id, read: true });
     },
@@ -416,13 +468,20 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "id"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const id = args.id as string;
       const mailboxHint = args.mailbox as string | undefined;
 
       if (!id) return errorResult("Error: id is required.");
 
-      const { uid, mailbox } = await resolveEmailId(imapClient, id, mailboxHint);
+      assertAllowed(env, mailboxHint);
+      const { uid, mailbox } = await resolveEmailId(
+        imapClient,
+        id,
+        mailboxHint,
+        env.blockedFolders
+      );
+      assertAllowed(env, mailbox);
       await markUnread(imapClient, uid, mailbox);
       return jsonResult({ id, read: false });
     },
@@ -438,8 +497,8 @@ const registry: ToolRegistration[] = [
       properties: { ...ACCOUNT_SCHEMA },
       required: ["account"],
     },
-    handler: async (imapClient) => {
-      const groups = await listAllStarredEmails(imapClient);
+    handler: async (imapClient, _args, env) => {
+      const groups = await listAllStarredEmails(imapClient, env.blockedFolders);
       const totalCount = groups.reduce((sum, g) => sum + g.count, 0);
       return jsonResult({ totalCount, folders: groups });
     },
@@ -464,9 +523,9 @@ const registry: ToolRegistration[] = [
       },
       required: ["account"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const color = args.color as string | undefined;
-      const groups = await listAllEmailsByColor(imapClient, color);
+      const groups = await listAllEmailsByColor(imapClient, color, env.blockedFolders);
       const totalCount = groups.reduce((sum, g) => sum + g.count, 0);
       return jsonResult({ totalCount, folders: groups });
     },
@@ -497,7 +556,7 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "sender", "source_folder", "destination_folder"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const sender = args.sender as string;
       const sourceFolder = args.source_folder as string;
       const destinationFolder = args.destination_folder as string;
@@ -507,6 +566,7 @@ const registry: ToolRegistration[] = [
           "Error: sender, source_folder, and destination_folder are required."
         );
 
+      assertAllowed(env, sourceFolder, destinationFolder);
       if (!(await folderExists(imapClient, sourceFolder)))
         return errorResult(`Source folder not found: "${sourceFolder}".`);
       if (!(await folderExists(imapClient, destinationFolder)))
@@ -560,7 +620,7 @@ const registry: ToolRegistration[] = [
       },
       required: ["account", "domain", "source_folder", "destination_folder"],
     },
-    handler: async (imapClient, args) => {
+    handler: async (imapClient, args, env) => {
       const domain = args.domain as string;
       const sourceFolder = args.source_folder as string;
       const destinationFolder = args.destination_folder as string;
@@ -570,6 +630,7 @@ const registry: ToolRegistration[] = [
           "Error: domain, source_folder, and destination_folder are required."
         );
 
+      assertAllowed(env, sourceFolder, destinationFolder);
       if (!(await folderExists(imapClient, sourceFolder)))
         return errorResult(`Source folder not found: "${sourceFolder}".`);
       if (!(await folderExists(imapClient, destinationFolder)))
@@ -656,7 +717,12 @@ export async function handleToolCall(
     return errorResult(`Error: unknown account "${account}" (see list_accounts).`);
 
   return serialize(async () => {
-    const imapClient = await env.getClient(account);
-    return handler(imapClient, args, env);
+    try {
+      const imapClient = await env.getClient(account);
+      return await handler(imapClient, args, env);
+    } catch (err) {
+      if (err instanceof BlockedFolderError) return errorResult(BLOCKED_MESSAGE);
+      throw err;
+    }
   });
 }

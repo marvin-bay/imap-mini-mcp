@@ -1,5 +1,6 @@
 import type { ImapClient } from "./client.js";
 import { listFolders } from "./folders.js";
+import { isBlockedFolder } from "../blocked.js";
 
 /**
  * Build the composite ID from date + messageId.
@@ -63,18 +64,20 @@ export async function resolveInMailbox(
 export async function resolveEmailId(
   imapClient: ImapClient,
   compositeId: string,
-  mailboxHint?: string
+  mailboxHint?: string,
+  blockedFolders: readonly string[] = []
 ): Promise<{ uid: number; mailbox: string }> {
+  const blocked = (m: string) => isBlockedFolder(m, blockedFolders);
   const { messageId } = parseCompositeId(compositeId);
 
   // 1. Try the hint mailbox first
-  if (mailboxHint) {
+  if (mailboxHint && !blocked(mailboxHint)) {
     const uid = await resolveInMailbox(imapClient, messageId, mailboxHint);
     if (uid) return { uid, mailbox: mailboxHint };
   }
 
   // 2. Try INBOX (skip if already tried as hint)
-  if (mailboxHint !== "INBOX") {
+  if (mailboxHint !== "INBOX" && !blocked("INBOX")) {
     const uid = await resolveInMailbox(imapClient, messageId, "INBOX");
     if (uid) return { uid, mailbox: "INBOX" };
   }
@@ -83,7 +86,7 @@ export async function resolveEmailId(
   const folders = await listFolders(imapClient);
   const tried = new Set([mailboxHint, "INBOX"]);
   for (const folder of folders) {
-    if (tried.has(folder.path)) continue;
+    if (tried.has(folder.path) || blocked(folder.path)) continue;
     const uid = await resolveInMailbox(imapClient, messageId, folder.path);
     if (uid) return { uid, mailbox: folder.path };
   }
