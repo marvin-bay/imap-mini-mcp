@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { listFolders, createFolder, folderExists, moveEmail, bulkMoveBySender, addLabel, removeLabel, listLabels } from "./folders.js";
+import { listFolders, createFolder, folderExists, moveEmail, bulkMoveBySender, addLabel, listLabels } from "./folders.js";
 import type { ImapClient } from "./client.js";
 
 function createMockImapClient(mailboxes: any[]) {
@@ -157,46 +157,6 @@ describe("addLabel", () => {
   });
 });
 
-// ---------------------------------------------------------------------------
-// removeLabel
-// ---------------------------------------------------------------------------
-
-describe("removeLabel", () => {
-  it("deletes email in Labels/<name> folder", async () => {
-    const { imapClient, mockClient } = createMockImapClientWithLabelOps();
-
-    const result = await removeLabel(imapClient, 55, "Work");
-
-    expect(mockClient.messageDelete).toHaveBeenCalledWith("55", { uid: true });
-    expect(result).toEqual({ removed: true });
-  });
-
-  it("opens the label folder before deleting", async () => {
-    const { imapClient } = createMockImapClientWithLabelOps();
-
-    await removeLabel(imapClient, 55, "Work");
-
-    expect(imapClient.openMailbox).toHaveBeenCalledWith("Labels/Work");
-  });
-
-  it("releases the lock on success", async () => {
-    const { imapClient, mockLock } = createMockImapClientWithLabelOps();
-
-    await removeLabel(imapClient, 55, "Work");
-    expect(mockLock.release).toHaveBeenCalled();
-  });
-
-  it("releases the lock on error", async () => {
-    const { imapClient, mockClient, mockLock } = createMockImapClientWithLabelOps();
-    mockClient.messageDelete.mockRejectedValue(new Error("delete failed"));
-
-    await expect(removeLabel(imapClient, 55, "Work")).rejects.toThrow("delete failed");
-    expect(mockLock.release).toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// createFolder
 // ---------------------------------------------------------------------------
 
 describe("createFolder", () => {

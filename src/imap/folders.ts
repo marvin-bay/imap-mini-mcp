@@ -105,28 +105,6 @@ export async function addLabel(
   }
 }
 
-/**
- * Remove a label from an email. Deletes the label copy in the Labels/<name>
- * folder — the original email in its source folder is unaffected.
- *
- * @param labelName - bare label name (e.g. "Work", not "Labels/Work")
- * @param uidInLabel - the UID of the email within the Labels/<name> folder
- */
-export async function removeLabel(
-  imapClient: ImapClient,
-  uidInLabel: number,
-  labelName: string
-): Promise<{ removed: boolean }> {
-  const labelPath = `Labels/${labelName}`;
-  const lock = await imapClient.openMailbox(labelPath);
-  try {
-    const client = imapClient.getClient();
-    await client.messageDelete(String(uidInLabel), { uid: true });
-    return { removed: true };
-  } finally {
-    lock.release();
-  }
-}
 
 /**
  * List all labels (folders under the Labels/ namespace).
