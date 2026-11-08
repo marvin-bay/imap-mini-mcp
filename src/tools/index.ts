@@ -8,6 +8,7 @@
 
 import type { ImapClient } from "../imap/index.js";
 import type { ToolEnvironment } from "../accounts.js";
+import { redactText } from "../redact.js";
 import { BLOCKED_MESSAGE, isBlockedFolder } from "../blocked.js";
 import {
   fetchEmailContent,
@@ -63,6 +64,15 @@ function jsonResult(data: unknown): ToolResult {
   return {
     content: [{ type: "text", text: JSON.stringify(data, null, 2) }],
   };
+}
+
+/** Redact codes/links in the subject of every list entry. */
+function redactSubjects<T extends { subject: string }>(entries: T[]): T[] {
+  return entries.map((e) => ({ ...e, subject: redactText(e.subject) }));
+}
+
+function redactGroups<T extends { emails: { subject: string }[] }>(groups: T[]): T[] {
+  return groups.map((g) => ({ ...g, emails: redactSubjects(g.emails) }));
 }
 
 class BlockedFolderError extends Error {
@@ -191,7 +201,7 @@ const registry: ToolRegistration[] = [
 
       assertAllowed(env, opts.folder);
       const emails = await findEmails(imapClient, opts);
-      return jsonResult({ count: emails.length, emails });
+      return jsonResult({ count: emails.length, emails: redactSubjects(emails) });
     },
   },
 
@@ -233,7 +243,11 @@ const registry: ToolRegistration[] = [
       if (!email)
         return errorResult(`No email found for id "${id}".`);
 
-      return jsonResult(email);
+      return jsonResult({
+        ...email,
+        subject: redactText(email.subject),
+        body: redactText(email.body),
+      });
     },
   },
 
@@ -500,7 +514,7 @@ const registry: ToolRegistration[] = [
     handler: async (imapClient, _args, env) => {
       const groups = await listAllStarredEmails(imapClient, env.blockedFolders);
       const totalCount = groups.reduce((sum, g) => sum + g.count, 0);
-      return jsonResult({ totalCount, folders: groups });
+      return jsonResult({ totalCount, folders: redactGroups(groups) });
     },
   },
 
@@ -527,7 +541,7 @@ const registry: ToolRegistration[] = [
       const color = args.color as string | undefined;
       const groups = await listAllEmailsByColor(imapClient, color, env.blockedFolders);
       const totalCount = groups.reduce((sum, g) => sum + g.count, 0);
-      return jsonResult({ totalCount, folders: groups });
+      return jsonResult({ totalCount, folders: redactGroups(groups) });
     },
   },
 

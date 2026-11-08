@@ -929,6 +929,53 @@ describe("handleToolCall — blocked folders", () => {
   });
 });
 
+describe("handleToolCall — redaction", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockResolveEmailId.mockResolvedValue({ uid: 1, mailbox: "INBOX" });
+  });
+
+  it("fetch_email_content redacts subject and body", async () => {
+    mockFetchContent.mockResolvedValue({
+      id: TEST_ID,
+      subject: "Ihr Code 123456",
+      from: "a@b.de",
+      to: "c@d.de",
+      date: "2026-11-08T10:00:00.000Z",
+      body: "Code: 654321\nReset: https://a.de/reset?t=1\nAm 08.11.2026, 12,99 EUR",
+      attachments: [],
+    });
+    const result = await call("fetch_email_content", { id: TEST_ID });
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.subject).toBe("Ihr Code [CODE]");
+    expect(parsed.body).toContain("Code: [CODE]");
+    expect(parsed.body).toContain("Reset: [LINK]");
+    expect(parsed.body).toContain("Am 08.11.2026, 12,99 EUR");
+    expect(result.content[0].text).not.toContain("654321");
+  });
+
+  it("find_emails redacts subjects", async () => {
+    mockFindEmails.mockResolvedValue([
+      { id: "x", subject: "TAN 998877", from: "a@b.de", date: "2026-11-08T10:00:00.000Z" },
+    ]);
+    const result = await call("find_emails");
+    expect(JSON.parse(result.content[0].text).emails[0].subject).toBe("TAN [CODE]");
+  });
+
+  it("starred and color listings redact subjects", async () => {
+    const entry = { id: "x", subject: "Code 112233", from: "a@b.de", date: "d" };
+    mockListAllStarredEmails.mockResolvedValue([{ folder: "INBOX", count: 1, emails: [entry] }]);
+    mockListAllEmailsByColor.mockResolvedValue([
+      { folder: "INBOX", count: 1, emails: [{ ...entry, color: "red" }] },
+    ]);
+    for (const tool of ["list_starred_emails", "list_emails_by_color"]) {
+      const result = await call(tool);
+      expect(result.content[0].text).toContain("Code [CODE]");
+      expect(result.content[0].text).not.toContain("112233");
+    }
+  });
+});
+
 describe("handleToolCall — unknown tool", () => {
   it("returns error for unknown tool name", async () => {
     const result = await call("nonexistent_tool",
