@@ -3,13 +3,13 @@ import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
-import { ImapClient } from "./imap/index.js";
+import type { ToolEnvironment } from "./accounts.js";
 import { tools, handleToolCall } from "./tools/index.js";
 
 /**
  * Create and configure the MCP server.
  */
-export function createServer(imapClient: ImapClient): Server {
+export function createServer(env: ToolEnvironment): Server {
   const server = new Server(
     {
       name: "imap-mini-mcp",
@@ -32,7 +32,7 @@ export function createServer(imapClient: ImapClient): Server {
     const { name, arguments: args } = request.params;
 
     try {
-      return await handleToolCall(imapClient, name, args || {});
+      return await handleToolCall(env, name, args || {});
     } catch (error) {
       const message =
         error instanceof Error ? error.message : String(error);

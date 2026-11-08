@@ -2,7 +2,8 @@
 
 import "dotenv/config";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createClientFromEnv } from "./imap/index.js";
+import { loadConfig } from "./config.js";
+import { AccountRegistry } from "./accounts.js";
 import { createServer } from "./server.js";
 import { safeStderrWrite } from "./stderr.js";
 
@@ -31,8 +32,12 @@ function logFatalError(label: string, err: unknown): void {
 }
 
 async function main() {
-  const imapClient = createClientFromEnv();
-  const server = createServer(imapClient);
+  const config = loadConfig();
+  const registry = new AccountRegistry(config.accounts, {
+    blockedFolders: config.blockedFolders,
+    maxBodyChars: config.maxBodyChars,
+  });
+  const server = createServer(registry);
   const transport = new StdioServerTransport();
 
   let isShuttingDown = false;
@@ -44,7 +49,7 @@ async function main() {
     isShuttingDown = true;
 
     try {
-      await imapClient.disconnect();
+      await registry.disconnectAll();
     } catch (error) {
       logFatalError("SHUTDOWN ERROR", error);
       exitCode = 1;

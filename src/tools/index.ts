@@ -7,6 +7,7 @@
  */
 
 import type { ImapClient } from "../imap/index.js";
+import type { ToolEnvironment } from "../accounts.js";
 import {
   fetchEmailContent,
   fetchEmailAttachment,
@@ -54,9 +55,17 @@ interface ToolRegistration {
   };
   handler: (
     imapClient: ImapClient,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
+    env: ToolEnvironment
   ) => Promise<ToolResult>;
 }
+
+const ACCOUNT_SCHEMA = {
+  account: {
+    type: "string",
+    description: "Account id (see list_accounts).",
+  },
+};
 
 function jsonResult(data: unknown): ToolResult {
   return {
@@ -107,6 +116,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         after: {
           type: "string",
           description:
@@ -144,6 +154,7 @@ const registry: ToolRegistration[] = [
             "Maximum number of results to return (newest first). Default 50, max 200.",
         },
       },
+      required: ["account"],
     },
     handler: async (imapClient, args) => {
       const opts: any = {
@@ -189,13 +200,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier from list results.",
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id"],
+      required: ["account", "id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -222,6 +234,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier from list results.",
@@ -233,7 +246,7 @@ const registry: ToolRegistration[] = [
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id", "attachment_id"],
+      required: ["account", "id", "attachment_id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -267,7 +280,8 @@ const registry: ToolRegistration[] = [
       "Use the path value when specifying a folder in other tools.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: { ...ACCOUNT_SCHEMA },
+      required: ["account"],
     },
     handler: async (imapClient) => {
       const folders = await listFolders(imapClient);
@@ -284,13 +298,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         path: {
           type: "string",
           description:
             'Full path of the folder to create (e.g. "INBOX/Receipts").',
         },
       },
-      required: ["path"],
+      required: ["account", "path"],
     },
     handler: async (imapClient, args) => {
       const path = args.path as string;
@@ -311,6 +326,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier.",
@@ -325,7 +341,7 @@ const registry: ToolRegistration[] = [
           description: "Folder to move the email to.",
         },
       },
-      required: ["id", "destination_folder"],
+      required: ["account", "id", "destination_folder"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -358,6 +374,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         to: {
           type: "string",
           description: "Recipient email address.",
@@ -385,7 +402,7 @@ const registry: ToolRegistration[] = [
             "Automatically sets In-Reply-To and References headers.",
         },
       },
-      required: ["to", "subject", "body"],
+      required: ["account", "to", "subject", "body"],
     },
     handler: async (imapClient, args) => {
       const to = args.to as string;
@@ -418,6 +435,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "ID of the email to reply to.",
@@ -433,7 +451,7 @@ const registry: ToolRegistration[] = [
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id", "body"],
+      required: ["account", "id", "body"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -494,13 +512,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier to star.",
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id"],
+      required: ["account", "id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -523,13 +542,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier to unstar.",
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id"],
+      required: ["account", "id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -552,13 +572,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier to mark as read.",
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id"],
+      required: ["account", "id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -581,13 +602,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier to mark as unread.",
         },
         ...MAILBOX_HINT_SCHEMA,
       },
-      required: ["id"],
+      required: ["account", "id"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -608,7 +630,8 @@ const registry: ToolRegistration[] = [
       LIST_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: { ...ACCOUNT_SCHEMA },
+      required: ["account"],
     },
     handler: async (imapClient) => {
       const groups = await listAllStarredEmails(imapClient);
@@ -627,12 +650,14 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         color: {
           type: "string",
           enum: ["red", "orange", "yellow", "green", "blue", "purple", "grey"],
           description: "Filter to emails with this color flag. Omit to return all color-flagged emails.",
         },
       },
+      required: ["account"],
     },
     handler: async (imapClient, args) => {
       const color = args.color as string | undefined;
@@ -652,6 +677,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "ID of the existing draft to replace.",
@@ -682,7 +708,7 @@ const registry: ToolRegistration[] = [
             "ID of the email being replied to (for threading).",
         },
       },
-      required: ["id", "to", "subject", "body"],
+      required: ["account", "id", "to", "subject", "body"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -728,6 +754,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         sender: {
           type: "string",
           description:
@@ -742,7 +769,7 @@ const registry: ToolRegistration[] = [
           description: "Folder to move matching emails to.",
         },
       },
-      required: ["sender", "source_folder", "destination_folder"],
+      required: ["account", "sender", "source_folder", "destination_folder"],
     },
     handler: async (imapClient, args) => {
       const sender = args.sender as string;
@@ -790,6 +817,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         domain: {
           type: "string",
           description:
@@ -804,7 +832,7 @@ const registry: ToolRegistration[] = [
           description: "Folder to move matching emails to.",
         },
       },
-      required: ["domain", "source_folder", "destination_folder"],
+      required: ["account", "domain", "source_folder", "destination_folder"],
     },
     handler: async (imapClient, args) => {
       const domain = args.domain as string;
@@ -854,6 +882,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier from list results.",
@@ -869,7 +898,7 @@ const registry: ToolRegistration[] = [
             "If omitted, searches all folders.",
         },
       },
-      required: ["id", "label"],
+      required: ["account", "id", "label"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -894,6 +923,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         id: {
           type: "string",
           description: "The email identifier from list results.",
@@ -903,7 +933,7 @@ const registry: ToolRegistration[] = [
           description: "Label name to remove (e.g. \"Work\", \"Important\").",
         },
       },
-      required: ["id", "label"],
+      required: ["account", "id", "label"],
     },
     handler: async (imapClient, args) => {
       const id = args.id as string;
@@ -937,7 +967,8 @@ const registry: ToolRegistration[] = [
       "Use the path value (e.g. \"Labels/Work\") as the folder parameter in other tools.",
     inputSchema: {
       type: "object",
-      properties: {},
+      properties: { ...ACCOUNT_SCHEMA },
+      required: ["account"],
     },
     handler: async (imapClient) => {
       const labels = await listLabels(imapClient);
@@ -954,6 +985,7 @@ const registry: ToolRegistration[] = [
     inputSchema: {
       type: "object",
       properties: {
+        ...ACCOUNT_SCHEMA,
         label: {
           type: "string",
           description: "Label name (e.g. \"Work\", \"Important\").",
@@ -964,7 +996,7 @@ const registry: ToolRegistration[] = [
             "Maximum number of results to return (newest first). Default 50, max 200.",
         },
       },
-      required: ["label"],
+      required: ["account", "label"],
     },
     handler: async (imapClient, args) => {
       const label = args.label as string;
@@ -990,24 +1022,56 @@ const registry: ToolRegistration[] = [
 // ---------------------------------------------------------------------------
 
 /** Tool schemas for MCP ListTools response. */
-export const tools = registry.map(({ name, description, inputSchema }) => ({
-  name,
-  description,
-  inputSchema,
-}));
+export const tools = [
+  {
+    name: "list_accounts",
+    description:
+      "List the configured mail accounts. Returns {accounts: [{id, user}]}. " +
+      "Use the id as the required `account` parameter of all other tools.",
+    inputSchema: { type: "object" as const, properties: {} },
+  },
+  ...registry.map(({ name, description, inputSchema }) => ({
+    name,
+    description,
+    inputSchema,
+  })),
+];
 
 /** Map-based dispatch — open for extension, closed for modification. */
 const handlerMap = new Map(
   registry.map((t) => [t.name, t.handler])
 );
 
+// Tool calls run strictly one after another so that no two IMAP logins
+// (or accounts) are ever active in parallel.
+let queue: Promise<unknown> = Promise.resolve();
+
+function serialize<T>(fn: () => Promise<T>): Promise<T> {
+  const run = queue.then(fn, fn);
+  queue = run.catch(() => undefined);
+  return run;
+}
+
 export async function handleToolCall(
-  imapClient: ImapClient,
+  env: ToolEnvironment,
   name: string,
   args: Record<string, unknown>
 ) {
+  if (name === "list_accounts") {
+    return jsonResult({ accounts: env.listAccounts() });
+  }
   const handler = handlerMap.get(name);
   if (!handler)
     return errorResult(`Unknown tool: ${name}`);
-  return handler(imapClient, args);
+
+  const account = args.account;
+  if (typeof account !== "string" || !account)
+    return errorResult("Error: account is required (see list_accounts).");
+  if (!env.hasAccount(account))
+    return errorResult(`Error: unknown account "${account}" (see list_accounts).`);
+
+  return serialize(async () => {
+    const imapClient = await env.getClient(account);
+    return handler(imapClient, args, env);
+  });
 }

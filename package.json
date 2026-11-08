@@ -30,7 +30,8 @@
     "html-to-text": "^9.0.5",
     "imapflow": "^1.0.171",
     "mailparser": "^3.9.3",
-    "mimetext": "^3.0.28"
+    "mimetext": "^3.0.28",
+    "yaml": "^2.9.1"
   },
   "devDependencies": {
     "@types/html-to-text": "^9.0.4",

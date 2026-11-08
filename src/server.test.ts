@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
-import type { ImapClient } from "./imap/index.js";
+import type { ToolEnvironment } from "./accounts.js";
 import { createServer } from "./server.js";
 
 vi.mock("./tools/index.js", async () => {
@@ -14,7 +14,7 @@ vi.mock("./tools/index.js", async () => {
 import { tools, handleToolCall } from "./tools/index.js";
 
 const mockHandleToolCall = vi.mocked(handleToolCall);
-const imapClient = {} as ImapClient;
+const imapClient = {} as ToolEnvironment;
 
 type TextContent = Array<{ type: string; text: string }>;
 

@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const mocks = vi.hoisted(() => ({
-  createClientFromEnv: vi.fn(),
+  loadConfig: vi.fn(),
+  AccountRegistry: vi.fn(),
   createServer: vi.fn(),
   safeStderrWrite: vi.fn(),
 }));
@@ -10,9 +11,8 @@ vi.mock("dotenv/config", () => ({}));
 vi.mock("@modelcontextprotocol/sdk/server/stdio.js", () => ({
   StdioServerTransport: class StdioServerTransport {},
 }));
-vi.mock("./imap/index.js", () => ({
-  createClientFromEnv: mocks.createClientFromEnv,
-}));
+vi.mock("./config.js", () => ({ loadConfig: mocks.loadConfig }));
+vi.mock("./accounts.js", () => ({ AccountRegistry: mocks.AccountRegistry }));
 vi.mock("./server.js", () => ({ createServer: mocks.createServer }));
 vi.mock("./stderr.js", () => ({ safeStderrWrite: mocks.safeStderrWrite }));
 
@@ -58,7 +58,14 @@ describe("entrypoint (src/index.ts)", () => {
     disconnect = vi.fn().mockResolvedValue(undefined);
     connect = vi.fn().mockResolvedValue(undefined);
 
-    mocks.createClientFromEnv.mockReset().mockReturnValue({ disconnect });
+    mocks.loadConfig.mockReset().mockReturnValue({
+      accounts: [{ id: "a" }],
+      blockedFolders: ["Sicherheit"],
+      maxBodyChars: 4000,
+    });
+    mocks.AccountRegistry.mockReset().mockImplementation(function () {
+      return { disconnectAll: disconnect };
+    });
     mocks.createServer.mockReset().mockReturnValue({ connect });
     mocks.safeStderrWrite.mockReset();
 
@@ -81,8 +88,12 @@ describe("entrypoint (src/index.ts)", () => {
     it("creates the IMAP client from the environment and connects the server over stdio", async () => {
       await loadAndWaitForStartup();
 
-      expect(mocks.createClientFromEnv).toHaveBeenCalledTimes(1);
-      expect(mocks.createServer).toHaveBeenCalledWith({ disconnect });
+      expect(mocks.loadConfig).toHaveBeenCalledTimes(1);
+      expect(mocks.AccountRegistry).toHaveBeenCalledWith([{ id: "a" }], {
+        blockedFolders: ["Sicherheit"],
+        maxBodyChars: 4000,
+      });
+      expect(mocks.createServer).toHaveBeenCalledWith({ disconnectAll: disconnect });
       expect(connect).toHaveBeenCalledTimes(1);
       expect(exitSpy).not.toHaveBeenCalled();
     });
@@ -96,8 +107,8 @@ describe("entrypoint (src/index.ts)", () => {
       );
     });
 
-    it("logs a fatal error and exits 1 when the IMAP environment is invalid", async () => {
-      mocks.createClientFromEnv.mockImplementation(() => {
+    it("logs a fatal error and exits 1 when the configuration is invalid", async () => {
+      mocks.loadConfig.mockImplementation(() => {
         throw new Error("IMAP_HOST environment variable is required");
       });
 

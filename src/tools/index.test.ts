@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { tools, handleToolCall } from "./index.js";
 import type { ImapClient } from "../imap/index.js";
+import type { ToolEnvironment } from "../accounts.js";
 
 // ---------------------------------------------------------------------------
 // Mock the imap module so we don't need real IMAP connections
@@ -88,6 +89,18 @@ const mockListAllStarredEmails = vi.mocked(listAllStarredEmails);
 const mockMarkRead = vi.mocked(markRead);
 const mockMarkUnread = vi.mocked(markUnread);
 const mockImapClient = {} as ImapClient;
+const mockEnv: ToolEnvironment = {
+  listAccounts: () => [{ id: "acc", user: "me@example.de" }],
+  hasAccount: (id) => id === "acc",
+  getClient: async () => mockImapClient,
+  blockedFolders: ["Sicherheit"],
+  maxBodyChars: 4000,
+};
+
+/** Call a tool on the mocked account "acc". */
+function call(name: string, args: Record<string, unknown> = {}) {
+  return handleToolCall(mockEnv, name, { account: "acc", ...args });
+}
 
 const TEST_ID = "2026-02-01T10:00:00.<msg@example.com>";
 
@@ -96,13 +109,14 @@ const TEST_ID = "2026-02-01T10:00:00.<msg@example.com>";
 // ---------------------------------------------------------------------------
 
 describe("tool definitions", () => {
-  it("exposes exactly 21 tools", () => {
-    expect(tools).toHaveLength(21);
+  it("exposes exactly 22 tools", () => {
+    expect(tools).toHaveLength(22);
   });
 
   it("has the expected tool names", () => {
     const names = tools.map((t) => t.name);
     expect(names).toEqual([
+      "list_accounts",
       "find_emails",
       "fetch_email_content",
       "fetch_email_attachment",
@@ -149,9 +163,7 @@ describe("handleToolCall — fetch_email_content", () => {
   });
 
   it("returns error when id is missing", async () => {
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_content",
+    const result = await call("fetch_email_content",
       {}
     );
     expect(result.isError).toBe(true);
@@ -161,9 +173,7 @@ describe("handleToolCall — fetch_email_content", () => {
   it("returns error when email not found", async () => {
     mockResolveEmailId.mockResolvedValue({ uid: 999, mailbox: "INBOX" });
     mockFetchContent.mockResolvedValue(null);
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_content",
+    const result = await call("fetch_email_content",
       { id: TEST_ID }
     );
     expect(result.isError).toBe(true);
@@ -182,9 +192,7 @@ describe("handleToolCall — fetch_email_content", () => {
       attachments: [],
     });
 
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_content",
+    const result = await call("fetch_email_content",
       { id: TEST_ID }
     );
     expect(result.isError).toBeUndefined();
@@ -205,9 +213,7 @@ describe("handleToolCall — fetch_email_attachment", () => {
   });
 
   it("returns error when id or attachment_id is missing", async () => {
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_attachment",
+    const result = await call("fetch_email_attachment",
       { id: TEST_ID }
     );
     expect(result.isError).toBe(true);
@@ -217,9 +223,7 @@ describe("handleToolCall — fetch_email_attachment", () => {
   it("returns error when attachment not found", async () => {
     mockResolveEmailId.mockResolvedValue({ uid: 1, mailbox: "INBOX" });
     mockFetchAttachment.mockResolvedValue(null);
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_attachment",
+    const result = await call("fetch_email_attachment",
       { id: TEST_ID, attachment_id: "nope" }
     );
     expect(result.isError).toBe(true);
@@ -236,9 +240,7 @@ describe("handleToolCall — fetch_email_attachment", () => {
       size: 42,
     });
 
-    const result = await handleToolCall(
-      mockImapClient,
-      "fetch_email_attachment",
+    const result = await call("fetch_email_attachment",
       { id: TEST_ID, attachment_id: "att-0" }
     );
     expect(result.isError).toBeUndefined();
@@ -264,7 +266,7 @@ describe("handleToolCall — list_folders", () => {
       { path: "Sent", name: "Sent", delimiter: "/" },
     ]);
 
-    const result = await handleToolCall(mockImapClient, "list_folders", {});
+    const result = await call("list_folders", {});
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.count).toBe(3);
     expect(parsed.folders[0].path).toBe("INBOX");
@@ -282,7 +284,7 @@ describe("handleToolCall — create_folder", () => {
   });
 
   it("returns error when path is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "create_folder", {});
+    const result = await call("create_folder", {});
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("path is required");
   });
@@ -290,7 +292,7 @@ describe("handleToolCall — create_folder", () => {
   it("creates folder and returns path", async () => {
     mockCreateFolder.mockResolvedValue("INBOX/Receipts");
 
-    const result = await handleToolCall(mockImapClient, "create_folder", {
+    const result = await call("create_folder", {
       path: "INBOX/Receipts",
     });
     const parsed = JSON.parse(result.content[0].text);
@@ -312,7 +314,7 @@ describe("handleToolCall — move_email", () => {
   });
 
   it("returns error when id or destination_folder is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "move_email", {
+    const result = await call("move_email", {
       id: TEST_ID,
     });
     expect(result.isError).toBe(true);
@@ -323,7 +325,7 @@ describe("handleToolCall — move_email", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockMoveEmail.mockResolvedValue({ uid: 55, destination: "INBOX/Receipts" });
 
-    const result = await handleToolCall(mockImapClient, "move_email", {
+    const result = await call("move_email", {
       id: TEST_ID,
       destination_folder: "INBOX/Receipts",
     });
@@ -342,7 +344,7 @@ describe("handleToolCall — move_email", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 7, mailbox: "Sent" });
     mockMoveEmail.mockResolvedValue({ uid: 10, destination: "Archive" });
 
-    await handleToolCall(mockImapClient, "move_email", {
+    await call("move_email", {
       id: TEST_ID,
       source_folder: "Sent",
       destination_folder: "Archive",
@@ -366,7 +368,7 @@ describe("handleToolCall — create_draft", () => {
   });
 
   it("returns error when required fields are missing", async () => {
-    const result = await handleToolCall(mockImapClient, "create_draft", {
+    const result = await call("create_draft", {
       to: "recipient@test.com",
     });
     expect(result.isError).toBe(true);
@@ -381,7 +383,7 @@ describe("handleToolCall — create_draft", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    const result = await handleToolCall(mockImapClient, "create_draft", {
+    const result = await call("create_draft", {
       to: "recipient@test.com",
       subject: "Test",
       body: "Hello",
@@ -413,7 +415,7 @@ describe("handleToolCall — draft_reply", () => {
   });
 
   it("returns error when id or body is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "draft_reply", {
+    const result = await call("draft_reply", {
       id: TEST_ID,
     });
     expect(result.isError).toBe(true);
@@ -423,7 +425,7 @@ describe("handleToolCall — draft_reply", () => {
   it("returns error when original email not found", async () => {
     mockResolveEmailId.mockResolvedValue({ uid: 999, mailbox: "INBOX" });
     mockFetchContent.mockResolvedValue(null);
-    const result = await handleToolCall(mockImapClient, "draft_reply", {
+    const result = await call("draft_reply", {
       id: TEST_ID,
       body: "Reply text",
     });
@@ -449,7 +451,7 @@ describe("handleToolCall — draft_reply", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    await handleToolCall(mockImapClient, "draft_reply", {
+    await call("draft_reply", {
       id: TEST_ID,
       body: "My reply",
     });
@@ -484,7 +486,7 @@ describe("handleToolCall — draft_reply", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    await handleToolCall(mockImapClient, "draft_reply", {
+    await call("draft_reply", {
       id: TEST_ID,
       body: "Reply",
     });
@@ -516,7 +518,7 @@ describe("handleToolCall — draft_reply", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    await handleToolCall(mockImapClient, "draft_reply", {
+    await call("draft_reply", {
       id: TEST_ID,
       body: "Reply to all",
       reply_all: true,
@@ -549,7 +551,7 @@ describe("handleToolCall — draft_reply", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    await handleToolCall(mockImapClient, "draft_reply", {
+    await call("draft_reply", {
       id: TEST_ID,
       body: "Reply",
       reply_all: true,
@@ -577,7 +579,7 @@ describe("handleToolCall — update_draft", () => {
   });
 
   it("returns error when required fields are missing", async () => {
-    const result = await handleToolCall(mockImapClient, "update_draft", {
+    const result = await call("update_draft", {
       id: TEST_ID,
     });
     expect(result.isError).toBe(true);
@@ -594,7 +596,7 @@ describe("handleToolCall — update_draft", () => {
       date: "2026-02-11T00:00:00.000Z",
     });
 
-    const result = await handleToolCall(mockImapClient, "update_draft", {
+    const result = await call("update_draft", {
       id: TEST_ID,
       to: "recipient@test.com",
       subject: "Updated",
@@ -629,7 +631,7 @@ describe("handleToolCall — update_draft", () => {
     mockFindDraftsFolder.mockResolvedValue("Drafts");
     mockResolveInMailbox.mockResolvedValue(null);
 
-    const result = await handleToolCall(mockImapClient, "update_draft", {
+    const result = await call("update_draft", {
       id: TEST_ID,
       to: "recipient@test.com",
       subject: "Updated",
@@ -651,7 +653,7 @@ describe("handleToolCall — star_email", () => {
   });
 
   it("returns error when id is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "star_email", {});
+    const result = await call("star_email", {});
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("id is required");
   });
@@ -660,7 +662,7 @@ describe("handleToolCall — star_email", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockStarEmail.mockResolvedValue({ uid: 42, starred: true });
 
-    const result = await handleToolCall(mockImapClient, "star_email", {
+    const result = await call("star_email", {
       id: TEST_ID,
     });
 
@@ -679,7 +681,7 @@ describe("handleToolCall — unstar_email", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockUnstarEmail.mockResolvedValue({ uid: 42, starred: false });
 
-    const result = await handleToolCall(mockImapClient, "unstar_email", {
+    const result = await call("unstar_email", {
       id: TEST_ID,
     });
 
@@ -729,7 +731,7 @@ describe("tool definitions — draft tools", () => {
 
   it("list_labels has no required parameters", () => {
     const tool = tools.find((t) => t.name === "list_labels")!;
-    expect(tool.inputSchema.required).toBeUndefined();
+    expect(tool.inputSchema.required).toEqual(["account"]);
   });
 });
 
@@ -750,9 +752,7 @@ describe("handleToolCall — bulk_move_by_sender_email", () => {
   });
 
   it("returns error when required params are missing", async () => {
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_email",
+    const result = await call("bulk_move_by_sender_email",
       { sender: "alice@example.com" }
     );
     expect(result.isError).toBe(true);
@@ -761,9 +761,7 @@ describe("handleToolCall — bulk_move_by_sender_email", () => {
 
   it("returns error when source folder not found", async () => {
     mockFolderExists.mockResolvedValueOnce(false);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_email",
+    const result = await call("bulk_move_by_sender_email",
       {
         sender: "alice@example.com",
         source_folder: "NonExistent",
@@ -777,9 +775,7 @@ describe("handleToolCall — bulk_move_by_sender_email", () => {
   it("returns error when destination folder not found", async () => {
     mockFolderExists.mockResolvedValueOnce(true);
     mockFolderExists.mockResolvedValueOnce(false);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_email",
+    const result = await call("bulk_move_by_sender_email",
       {
         sender: "alice@example.com",
         source_folder: "INBOX",
@@ -793,9 +789,7 @@ describe("handleToolCall — bulk_move_by_sender_email", () => {
   it("returns error when no emails match", async () => {
     mockFolderExists.mockResolvedValue(true);
     mockBulkMoveBySender.mockResolvedValue(0);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_email",
+    const result = await call("bulk_move_by_sender_email",
       {
         sender: "nobody@example.com",
         source_folder: "INBOX",
@@ -810,9 +804,7 @@ describe("handleToolCall — bulk_move_by_sender_email", () => {
     mockFolderExists.mockResolvedValue(true);
     mockBulkMoveBySender.mockResolvedValue(5);
 
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_email",
+    const result = await call("bulk_move_by_sender_email",
       {
         sender: "alice@example.com",
         source_folder: "INBOX",
@@ -852,9 +844,7 @@ describe("handleToolCall — bulk_move_by_sender_domain", () => {
   });
 
   it("returns error when required params are missing", async () => {
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_domain",
+    const result = await call("bulk_move_by_sender_domain",
       { domain: "example.com" }
     );
     expect(result.isError).toBe(true);
@@ -863,9 +853,7 @@ describe("handleToolCall — bulk_move_by_sender_domain", () => {
 
   it("returns error when source folder not found", async () => {
     mockFolderExists.mockResolvedValueOnce(false);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_domain",
+    const result = await call("bulk_move_by_sender_domain",
       {
         domain: "example.com",
         source_folder: "NonExistent",
@@ -879,9 +867,7 @@ describe("handleToolCall — bulk_move_by_sender_domain", () => {
   it("returns error when destination folder not found", async () => {
     mockFolderExists.mockResolvedValueOnce(true);
     mockFolderExists.mockResolvedValueOnce(false);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_domain",
+    const result = await call("bulk_move_by_sender_domain",
       {
         domain: "example.com",
         source_folder: "INBOX",
@@ -895,9 +881,7 @@ describe("handleToolCall — bulk_move_by_sender_domain", () => {
   it("returns error when no emails match", async () => {
     mockFolderExists.mockResolvedValue(true);
     mockBulkMoveBySender.mockResolvedValue(0);
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_domain",
+    const result = await call("bulk_move_by_sender_domain",
       {
         domain: "nobody.com",
         source_folder: "INBOX",
@@ -912,9 +896,7 @@ describe("handleToolCall — bulk_move_by_sender_domain", () => {
     mockFolderExists.mockResolvedValue(true);
     mockBulkMoveBySender.mockResolvedValue(12);
 
-    const result = await handleToolCall(
-      mockImapClient,
-      "bulk_move_by_sender_domain",
+    const result = await call("bulk_move_by_sender_domain",
       {
         domain: "example.com",
         source_folder: "INBOX",
@@ -948,7 +930,7 @@ describe("handleToolCall — find_emails", () => {
 
   it("applies a default limit and folder INBOX when no params given", async () => {
     mockFindEmails.mockResolvedValue([]);
-    await handleToolCall(mockImapClient, "find_emails", {});
+    await call("find_emails", {});
     expect(mockFindEmails).toHaveBeenCalledWith(mockImapClient, {
       folder: "INBOX",
       limit: 50,
@@ -957,7 +939,7 @@ describe("handleToolCall — find_emails", () => {
 
   it("clamps an oversized limit to the maximum", async () => {
     mockFindEmails.mockResolvedValue([]);
-    await handleToolCall(mockImapClient, "find_emails", { limit: 5000 });
+    await call("find_emails", { limit: 5000 });
     const opts = mockFindEmails.mock.calls[0][1];
     expect(opts.limit).toBe(200);
   });
@@ -965,7 +947,7 @@ describe("handleToolCall — find_emails", () => {
   it("parses relative after param", async () => {
     mockFindEmails.mockResolvedValue([]);
     const before = Date.now();
-    await handleToolCall(mockImapClient, "find_emails", { after: "2h" });
+    await call("find_emails", { after: "2h" });
 
     const opts = mockFindEmails.mock.calls[0][1];
     expect(opts.after).toBeInstanceOf(Date);
@@ -976,7 +958,7 @@ describe("handleToolCall — find_emails", () => {
 
   it("parses ISO before param", async () => {
     mockFindEmails.mockResolvedValue([]);
-    await handleToolCall(mockImapClient, "find_emails", {
+    await call("find_emails", {
       before: "2026-02-20T00:00:00Z",
     });
     const opts = mockFindEmails.mock.calls[0][1];
@@ -985,7 +967,7 @@ describe("handleToolCall — find_emails", () => {
 
   it("passes from, subject, unread_only, has_attachment, limit", async () => {
     mockFindEmails.mockResolvedValue([]);
-    await handleToolCall(mockImapClient, "find_emails", {
+    await call("find_emails", {
       from: "@stripe.com",
       subject: "invoice",
       unread_only: true,
@@ -1004,7 +986,7 @@ describe("handleToolCall — find_emails", () => {
   });
 
   it("returns error for invalid after value", async () => {
-    const result = await handleToolCall(mockImapClient, "find_emails", {
+    const result = await call("find_emails", {
       after: "xyz",
     });
     expect(result.isError).toBe(true);
@@ -1015,7 +997,7 @@ describe("handleToolCall — find_emails", () => {
     mockFindEmails.mockResolvedValue([
       { id: TEST_ID, subject: "Hello", from: "a@b.com", date: "2026-02-20T00:00:00.000Z" },
     ]);
-    const result = await handleToolCall(mockImapClient, "find_emails", { after: "7d" });
+    const result = await call("find_emails", { after: "7d" });
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.count).toBe(1);
     expect(parsed.emails[0].subject).toBe("Hello");
@@ -1032,7 +1014,7 @@ describe("handleToolCall — add_label", () => {
   });
 
   it("returns error when id is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "add_label", {
+    const result = await call("add_label", {
       label: "Work",
     });
     expect(result.isError).toBe(true);
@@ -1040,7 +1022,7 @@ describe("handleToolCall — add_label", () => {
   });
 
   it("returns error when label is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "add_label", {
+    const result = await call("add_label", {
       id: TEST_ID,
     });
     expect(result.isError).toBe(true);
@@ -1051,7 +1033,7 @@ describe("handleToolCall — add_label", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockAddLabel.mockResolvedValue({ labelPath: "Labels/Work" });
 
-    const result = await handleToolCall(mockImapClient, "add_label", {
+    const result = await call("add_label", {
       id: TEST_ID,
       label: "Work",
     });
@@ -1068,7 +1050,7 @@ describe("handleToolCall — add_label", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockAddLabel.mockResolvedValue({ labelPath: "Labels/Work" });
 
-    await handleToolCall(mockImapClient, "add_label", {
+    await call("add_label", {
       id: TEST_ID,
       label: "Work",
       source_folder: "INBOX",
@@ -1088,7 +1070,7 @@ describe("handleToolCall — remove_label", () => {
   });
 
   it("returns error when id is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "remove_label", {
+    const result = await call("remove_label", {
       label: "Work",
     });
     expect(result.isError).toBe(true);
@@ -1096,7 +1078,7 @@ describe("handleToolCall — remove_label", () => {
   });
 
   it("returns error when label is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "remove_label", {
+    const result = await call("remove_label", {
       id: TEST_ID,
     });
     expect(result.isError).toBe(true);
@@ -1106,7 +1088,7 @@ describe("handleToolCall — remove_label", () => {
   it("returns error when email not found in label folder", async () => {
     mockResolveInMailbox.mockResolvedValue(null);
 
-    const result = await handleToolCall(mockImapClient, "remove_label", {
+    const result = await call("remove_label", {
       id: TEST_ID,
       label: "Work",
     });
@@ -1118,7 +1100,7 @@ describe("handleToolCall — remove_label", () => {
   it("resolves ID in label folder and removes label", async () => {
     mockResolveInMailbox.mockResolvedValue(55);
 
-    const result = await handleToolCall(mockImapClient, "remove_label", {
+    const result = await call("remove_label", {
       id: TEST_ID,
       label: "Work",
     });
@@ -1151,7 +1133,7 @@ describe("handleToolCall — list_labels", () => {
       { path: "Labels/Important", name: "Important", delimiter: "/" },
     ]);
 
-    const result = await handleToolCall(mockImapClient, "list_labels", {});
+    const result = await call("list_labels", {});
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.count).toBe(2);
     expect(parsed.labels[0].path).toBe("Labels/Work");
@@ -1161,7 +1143,7 @@ describe("handleToolCall — list_labels", () => {
   it("returns empty array when no labels exist", async () => {
     mockListLabels.mockResolvedValue([]);
 
-    const result = await handleToolCall(mockImapClient, "list_labels", {});
+    const result = await call("list_labels", {});
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.count).toBe(0);
     expect(parsed.labels).toEqual([]);
@@ -1179,11 +1161,11 @@ describe("handleToolCall — get_emails_by_label", () => {
 
   it("requires label", () => {
     const tool = tools.find((t) => t.name === "get_emails_by_label")!;
-    expect(tool.inputSchema.required).toEqual(["label"]);
+    expect(tool.inputSchema.required).toEqual(["account", "label"]);
   });
 
   it("returns an error when label is empty", async () => {
-    const result = await handleToolCall(mockImapClient, "get_emails_by_label", {
+    const result = await call("get_emails_by_label", {
       label: "",
     });
     expect(result.isError).toBe(true);
@@ -1194,7 +1176,7 @@ describe("handleToolCall — get_emails_by_label", () => {
   it("searches the Labels/<name> folder with the default limit", async () => {
     mockFindEmails.mockResolvedValue([]);
 
-    await handleToolCall(mockImapClient, "get_emails_by_label", {
+    await call("get_emails_by_label", {
       label: "Work",
     });
 
@@ -1207,7 +1189,7 @@ describe("handleToolCall — get_emails_by_label", () => {
   it("clamps an oversized limit to the maximum", async () => {
     mockFindEmails.mockResolvedValue([]);
 
-    await handleToolCall(mockImapClient, "get_emails_by_label", {
+    await call("get_emails_by_label", {
       label: "Work",
       limit: 5000,
     });
@@ -1218,7 +1200,7 @@ describe("handleToolCall — get_emails_by_label", () => {
   it("raises a non-positive limit to 1", async () => {
     mockFindEmails.mockResolvedValue([]);
 
-    await handleToolCall(mockImapClient, "get_emails_by_label", {
+    await call("get_emails_by_label", {
       label: "Work",
       limit: -5,
     });
@@ -1236,7 +1218,7 @@ describe("handleToolCall — get_emails_by_label", () => {
       },
     ]);
 
-    const result = await handleToolCall(mockImapClient, "get_emails_by_label", {
+    const result = await call("get_emails_by_label", {
       label: "Work",
     });
 
@@ -1267,13 +1249,13 @@ describe("handleToolCall — list_emails_by_color", () => {
       "purple",
       "grey",
     ]);
-    expect(tool.inputSchema.required).toBeUndefined();
+    expect(tool.inputSchema.required).toEqual(["account"]);
   });
 
   it("lists all colors when no color is given", async () => {
     mockListAllEmailsByColor.mockResolvedValue([]);
 
-    await handleToolCall(mockImapClient, "list_emails_by_color", {});
+    await call("list_emails_by_color", {});
 
     expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, undefined);
   });
@@ -1281,7 +1263,7 @@ describe("handleToolCall — list_emails_by_color", () => {
   it("passes the color filter through", async () => {
     mockListAllEmailsByColor.mockResolvedValue([]);
 
-    await handleToolCall(mockImapClient, "list_emails_by_color", { color: "red" });
+    await call("list_emails_by_color", { color: "red" });
 
     expect(mockListAllEmailsByColor).toHaveBeenCalledWith(mockImapClient, "red");
   });
@@ -1299,7 +1281,7 @@ describe("handleToolCall — list_emails_by_color", () => {
       { folder: "Sent", count: 1, emails: [email(3, "red")] },
     ]);
 
-    const result = await handleToolCall(mockImapClient, "list_emails_by_color", {});
+    const result = await call("list_emails_by_color", {});
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.totalCount).toBe(3);
@@ -1311,7 +1293,7 @@ describe("handleToolCall — list_emails_by_color", () => {
   it("returns totalCount 0 when nothing is color-flagged", async () => {
     mockListAllEmailsByColor.mockResolvedValue([]);
 
-    const result = await handleToolCall(mockImapClient, "list_emails_by_color", {});
+    const result = await call("list_emails_by_color", {});
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toEqual({ totalCount: 0, folders: [] });
@@ -1328,7 +1310,7 @@ describe("handleToolCall — mark_read", () => {
   });
 
   it("returns an error when id is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "mark_read", {});
+    const result = await call("mark_read", {});
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("id is required");
@@ -1339,7 +1321,7 @@ describe("handleToolCall — mark_read", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockMarkRead.mockResolvedValue({ uid: 42, read: true });
 
-    const result = await handleToolCall(mockImapClient, "mark_read", { id: TEST_ID });
+    const result = await call("mark_read", { id: TEST_ID });
 
     expect(mockMarkRead).toHaveBeenCalledWith(mockImapClient, 42, "INBOX");
     expect(JSON.parse(result.content[0].text)).toEqual({ id: TEST_ID, read: true });
@@ -1349,7 +1331,7 @@ describe("handleToolCall — mark_read", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 7, mailbox: "Archive" });
     mockMarkRead.mockResolvedValue({ uid: 7, read: true });
 
-    await handleToolCall(mockImapClient, "mark_read", { id: TEST_ID, mailbox: "Archive" });
+    await call("mark_read", { id: TEST_ID, mailbox: "Archive" });
 
     expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive");
     expect(mockMarkRead).toHaveBeenCalledWith(mockImapClient, 7, "Archive");
@@ -1362,7 +1344,7 @@ describe("handleToolCall — mark_unread", () => {
   });
 
   it("returns an error when id is missing", async () => {
-    const result = await handleToolCall(mockImapClient, "mark_unread", {});
+    const result = await call("mark_unread", {});
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("id is required");
@@ -1373,7 +1355,7 @@ describe("handleToolCall — mark_unread", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 42, mailbox: "INBOX" });
     mockMarkUnread.mockResolvedValue({ uid: 42, read: false });
 
-    const result = await handleToolCall(mockImapClient, "mark_unread", { id: TEST_ID });
+    const result = await call("mark_unread", { id: TEST_ID });
 
     expect(mockMarkUnread).toHaveBeenCalledWith(mockImapClient, 42, "INBOX");
     expect(JSON.parse(result.content[0].text)).toEqual({ id: TEST_ID, read: false });
@@ -1383,7 +1365,7 @@ describe("handleToolCall — mark_unread", () => {
     mockResolveEmailId.mockResolvedValue({ uid: 7, mailbox: "Archive" });
     mockMarkUnread.mockResolvedValue({ uid: 7, read: false });
 
-    await handleToolCall(mockImapClient, "mark_unread", { id: TEST_ID, mailbox: "Archive" });
+    await call("mark_unread", { id: TEST_ID, mailbox: "Archive" });
 
     expect(mockResolveEmailId).toHaveBeenCalledWith(mockImapClient, TEST_ID, "Archive");
     expect(mockMarkUnread).toHaveBeenCalledWith(mockImapClient, 7, "Archive");
@@ -1411,7 +1393,7 @@ describe("handleToolCall — list_starred_emails", () => {
       { folder: "Sent", count: 1, emails: [email(3)] },
     ]);
 
-    const result = await handleToolCall(mockImapClient, "list_starred_emails", {});
+    const result = await call("list_starred_emails", {});
 
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.totalCount).toBe(3);
@@ -1421,7 +1403,7 @@ describe("handleToolCall — list_starred_emails", () => {
   it("returns totalCount 0 when nothing is starred", async () => {
     mockListAllStarredEmails.mockResolvedValue([]);
 
-    const result = await handleToolCall(mockImapClient, "list_starred_emails", {});
+    const result = await call("list_starred_emails", {});
 
     expect(JSON.parse(result.content[0].text)).toEqual({ totalCount: 0, folders: [] });
   });
@@ -1431,11 +1413,60 @@ describe("handleToolCall — list_starred_emails", () => {
 // handleToolCall — unknown tool
 // ---------------------------------------------------------------------------
 
+describe("handleToolCall — accounts", () => {
+  it("list_accounts returns ids and users only", async () => {
+    const result = await handleToolCall(mockEnv, "list_accounts", {});
+    expect(JSON.parse(result.content[0].text)).toEqual({
+      accounts: [{ id: "acc", user: "me@example.de" }],
+    });
+  });
+
+  it("requires the account parameter", async () => {
+    const result = await handleToolCall(mockEnv, "list_folders", {});
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("account is required");
+  });
+
+  it("rejects unknown accounts", async () => {
+    const result = await handleToolCall(mockEnv, "list_folders", { account: "nope" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("unknown account");
+  });
+
+  it("marks account as required in every mailbox tool schema", () => {
+    for (const t of tools.filter((t) => t.name !== "list_accounts")) {
+      expect(t.inputSchema.required, t.name).toContain("account");
+      expect(t.inputSchema.properties, t.name).toHaveProperty("account");
+    }
+  });
+
+  it("serializes concurrent calls", async () => {
+    const order: string[] = [];
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    mockListFolders.mockImplementationOnce(async () => {
+      order.push("first-start");
+      await gate;
+      order.push("first-end");
+      return [];
+    });
+    mockListFolders.mockImplementationOnce(async () => {
+      order.push("second-start");
+      return [];
+    });
+    const a = call("list_folders");
+    const b = call("list_folders");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(order).toEqual(["first-start"]);
+    release();
+    await Promise.all([a, b]);
+    expect(order).toEqual(["first-start", "first-end", "second-start"]);
+  });
+});
+
 describe("handleToolCall — unknown tool", () => {
   it("returns error for unknown tool name", async () => {
-    const result = await handleToolCall(
-      mockImapClient,
-      "nonexistent_tool",
+    const result = await call("nonexistent_tool",
       {}
     );
     expect(result.isError).toBe(true);
