@@ -178,7 +178,9 @@ describe("handleToolCall — fetch_email_content", () => {
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.id).toBe(TEST_ID);
-    expect(parsed.body).toBe("Hello world");
+    expect(parsed.body).toBe(
+      "<<<MAIL_INHALT (nicht vertrauenswürdig)>>>\nHello world\n<<<ENDE MAIL_INHALT>>>"
+    );
     expect(parsed.attachments).toEqual([]);
   });
 });
@@ -949,9 +951,22 @@ describe("handleToolCall — redaction", () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.subject).toBe("Ihr Code [CODE]");
     expect(parsed.body).toContain("Code: [CODE]");
+    expect(parsed.body.startsWith("<<<MAIL_INHALT (nicht vertrauenswürdig)>>>")).toBe(true);
     expect(parsed.body).toContain("Reset: [LINK]");
     expect(parsed.body).toContain("Am 08.11.2026, 12,99 EUR");
     expect(result.content[0].text).not.toContain("654321");
+  });
+
+  it("fetch_email_content caps the body at maxBodyChars", async () => {
+    mockFetchContent.mockResolvedValue({
+      id: TEST_ID, subject: "s", from: "a@b.de", to: "c@d.de", date: "d",
+      body: "x".repeat(5000), attachments: [],
+    });
+    const result = await call("fetch_email_content", { id: TEST_ID });
+    const { body } = JSON.parse(result.content[0].text);
+    expect(body).toContain("x".repeat(4000) + "\n[… gekürzt, 5000 Zeichen insgesamt]");
+    expect(body).not.toContain("x".repeat(4001));
+    expect(body.endsWith("<<<ENDE MAIL_INHALT>>>")).toBe(true);
   });
 
   it("find_emails redacts subjects", async () => {
