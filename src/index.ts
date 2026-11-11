@@ -36,6 +36,8 @@ async function main() {
   const registry = new AccountRegistry(config.accounts, {
     blockedFolders: config.blockedFolders,
     maxBodyChars: config.maxBodyChars,
+    downloadDir: config.downloadDir,
+    maxDownloadBytes: config.maxDownloadBytes,
   });
   const server = createServer(registry);
   const transport = new StdioServerTransport();

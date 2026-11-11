@@ -5,6 +5,9 @@ export {
   hasAttachmentPart,
   fetchEmailContent,
   fetchEmailAttachment,
+  fetchEmailAttachmentBuffer,
+  fetchRawEmail,
+  TooLargeError,
   extractEmailAddress,
 } from "./search.js";
 export type { FindEmailsOptions } from "./search.js";
@@ -22,5 +25,7 @@ export type {
   EmailContent,
   AttachmentInfo,
   AttachmentData,
+  AttachmentBuffer,
+  RawEmail,
 } from "./search.js";
 export type { FolderEntry } from "./folders.js";

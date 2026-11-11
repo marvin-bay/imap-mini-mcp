@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { parseTimeParam, hasAttachmentPart, findEmails, extractEmailAddress, extractTextBody, fetchEmailContent, fetchEmailAttachment } from "./search.js";
+import { parseTimeParam, hasAttachmentPart, findEmails, extractEmailAddress, extractTextBody, fetchEmailContent, fetchEmailAttachment, fetchRawEmail, fetchEmailAttachmentBuffer, TooLargeError } from "./search.js";
 import type { ImapClient } from "./client.js";
 import type { MessageStructureObject } from "imapflow";
 import type { ParsedMail } from "mailparser";
@@ -649,5 +649,104 @@ describe("findEmails", () => {
     mockClient.search.mockRejectedValueOnce(new Error("IMAP error"));
     await expect(findEmails(imapClient, {})).rejects.toThrow("IMAP error");
     expect(mockLock.release).toHaveBeenCalled();
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// fetchRawEmail / fetchEmailAttachmentBuffer
+// ---------------------------------------------------------------------------
+
+const BOUNDARY = "----b789";
+const MAIL_WITH_CSV = Buffer.from(
+  [
+    "From: sender@example.com",
+    "To: receiver@example.com",
+    "Subject: Mit Anhang",
+    "Message-ID: <m1@example.com>",
+    "Date: Sun, 01 Feb 2026 10:00:00 +0000",
+    `Content-Type: multipart/mixed; boundary="${BOUNDARY}"`,
+    "",
+    `--${BOUNDARY}`,
+    "Content-Type: text/plain",
+    "",
+    "Body.",
+    `--${BOUNDARY}`,
+    "Content-Type: text/csv",
+    'Content-Disposition: attachment; filename="data.csv"',
+    "Content-Transfer-Encoding: base64",
+    "",
+    Buffer.from("name,value\nalice,42\n").toString("base64"),
+    `--${BOUNDARY}--`,
+  ].join("\r\n")
+);
+
+/** fetchOne answers the size probe first, then the real fetch. */
+function sizedClient(size: number | undefined, full: any) {
+  const made = createMockImapClient({});
+  made.mockClient.fetchOne = vi
+    .fn()
+    .mockResolvedValueOnce(size === undefined && full === null ? null : { uid: 1, size })
+    .mockResolvedValueOnce(full);
+  return made;
+}
+
+describe("fetchRawEmail", () => {
+  it("returns the unmodified source plus envelope data", async () => {
+    const { imapClient, mockLock } = sizedClient(MAIL_WITH_CSV.length, {
+      uid: 1,
+      source: MAIL_WITH_CSV,
+      envelope: { subject: "Mit Anhang", date: new Date("2026-02-01T10:00:00Z"), messageId: "<m1@example.com>" },
+    });
+    const raw = await fetchRawEmail(imapClient, 1, "INBOX", 1_000_000);
+    expect(raw?.source).toEqual(MAIL_WITH_CSV);
+    expect(raw?.subject).toBe("Mit Anhang");
+    expect(raw?.id).toBe("2026-02-01T10:00:00.<m1@example.com>");
+    expect(mockLock.release).toHaveBeenCalled();
+  });
+
+  it("returns null when the mail does not exist", async () => {
+    const { imapClient } = sizedClient(undefined, null);
+    expect(await fetchRawEmail(imapClient, 1, "INBOX", 1000)).toBeNull();
+  });
+
+  it("refuses oversized mails before downloading them", async () => {
+    const { imapClient, mockClient, mockLock } = sizedClient(50_000_000, null);
+    await expect(fetchRawEmail(imapClient, 1, "INBOX", 1_000_000)).rejects.toBeInstanceOf(TooLargeError);
+    expect(mockClient.fetchOne).toHaveBeenCalledTimes(1); // only the size probe
+    expect(mockLock.release).toHaveBeenCalled();
+  });
+});
+
+describe("fetchEmailAttachmentBuffer", () => {
+  it("returns the decoded bytes of the attachment", async () => {
+    const { imapClient } = sizedClient(MAIL_WITH_CSV.length, { uid: 1, source: MAIL_WITH_CSV });
+    const att = await fetchEmailAttachmentBuffer(imapClient, 1, "attachment-0", "INBOX", 1_000_000);
+    expect(att?.filename).toBe("data.csv");
+    expect(att?.contentType).toBe("text/csv");
+    expect(att?.content.toString()).toBe("name,value\nalice,42\n");
+    expect(att?.size).toBe(att?.content.length);
+  });
+
+  it("returns null for an unknown attachment id or a missing mail", async () => {
+    const a = sizedClient(MAIL_WITH_CSV.length, { uid: 1, source: MAIL_WITH_CSV });
+    expect(await fetchEmailAttachmentBuffer(a.imapClient, 1, "nope", "INBOX", 1_000_000)).toBeNull();
+    const b = sizedClient(undefined, null);
+    expect(await fetchEmailAttachmentBuffer(b.imapClient, 1, "attachment-0", "INBOX", 1_000_000)).toBeNull();
+  });
+
+  it("refuses when the whole message is far above the limit (no download)", async () => {
+    const { imapClient, mockClient } = sizedClient(100 * 1024 * 1024, null);
+    await expect(
+      fetchEmailAttachmentBuffer(imapClient, 1, "attachment-0", "INBOX", 1024 * 1024)
+    ).rejects.toBeInstanceOf(TooLargeError);
+    expect(mockClient.fetchOne).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses when the decoded attachment exceeds the limit", async () => {
+    const { imapClient } = sizedClient(MAIL_WITH_CSV.length, { uid: 1, source: MAIL_WITH_CSV });
+    await expect(
+      fetchEmailAttachmentBuffer(imapClient, 1, "attachment-0", "INBOX", 5)
+    ).rejects.toBeInstanceOf(TooLargeError);
   });
 });

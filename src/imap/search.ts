@@ -369,3 +369,133 @@ export async function fetchEmailAttachment(
     lock.release();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Raw message and attachment bytes (for writing to disk, not for the agent)
+// ---------------------------------------------------------------------------
+
+export class TooLargeError extends Error {
+  constructor(public readonly size: number, public readonly limit: number) {
+    super(`Zu groß: ${size} Bytes (Limit ${limit} Bytes).`);
+  }
+}
+
+export interface RawEmail {
+  /** Complete RFC 822 message exactly as stored on the server. */
+  source: Buffer;
+  subject: string;
+  /** ISO 8601 date string, "" if unknown */
+  date: string;
+  /** Composite id (date.messageId) */
+  id: string;
+}
+
+export interface AttachmentBuffer {
+  id: string;
+  filename: string;
+  contentType: string;
+  content: Buffer;
+  size: number;
+}
+
+/** Ask the server for the message size first so oversized mails are never loaded. */
+async function assertMessageSize(
+  imapClient: ImapClient,
+  uid: number,
+  limit: number
+): Promise<boolean> {
+  const client = imapClient.getClient();
+  const head = await client.fetchOne(
+    String(uid),
+    { uid: true, size: true },
+    { uid: true }
+  );
+  if (!head) return false;
+  if (typeof head.size === "number" && head.size > limit) {
+    throw new TooLargeError(head.size, limit);
+  }
+  return true;
+}
+
+/**
+ * Fetch the unmodified source of one email (for .eml export).
+ * Throws TooLargeError if the message is larger than maxBytes.
+ */
+export async function fetchRawEmail(
+  imapClient: ImapClient,
+  uid: number,
+  mailbox: string,
+  maxBytes: number
+): Promise<RawEmail | null> {
+  const lock = await imapClient.openMailbox(mailbox);
+  try {
+    if (!(await assertMessageSize(imapClient, uid, maxBytes))) return null;
+
+    const client = imapClient.getClient();
+    const msg = await client.fetchOne(
+      String(uid),
+      { uid: true, envelope: true, source: true },
+      { uid: true }
+    );
+    if (!msg || !msg.source) return null;
+    if (msg.source.length > maxBytes) throw new TooLargeError(msg.source.length, maxBytes);
+
+    const date = msg.envelope?.date || new Date(0);
+    return {
+      source: msg.source,
+      subject: msg.envelope?.subject || "(no subject)",
+      date: msg.envelope?.date?.toISOString() || "",
+      id: buildCompositeId(date, msg.envelope?.messageId || ""),
+    };
+  } finally {
+    lock.release();
+  }
+}
+
+/**
+ * Fetch the decoded bytes of one attachment (for writing to disk).
+ * The whole message has to be transferred, so the message size is checked
+ * against a limit derived from maxBytes (base64 overhead plus headers/body)
+ * before downloading, and the attachment itself against maxBytes afterwards.
+ */
+export async function fetchEmailAttachmentBuffer(
+  imapClient: ImapClient,
+  uid: number,
+  attachmentId: string,
+  mailbox: string,
+  maxBytes: number
+): Promise<AttachmentBuffer | null> {
+  const lock = await imapClient.openMailbox(mailbox);
+  try {
+    const messageLimit = Math.ceil(maxBytes * 1.4) + 1024 * 1024;
+    if (!(await assertMessageSize(imapClient, uid, messageLimit))) return null;
+
+    const client = imapClient.getClient();
+    const msg = await client.fetchOne(
+      String(uid),
+      { uid: true, source: true },
+      { uid: true }
+    );
+    if (!msg || !msg.source) return null;
+
+    const parsed = await simpleParser(msg.source);
+    const attachment = (parsed.attachments || []).find((att, index) => {
+      const id = att.contentId || `attachment-${index}`;
+      return id === attachmentId;
+    });
+    if (!attachment) return null;
+
+    const size = attachment.content.length;
+    if (size > maxBytes) throw new TooLargeError(size, maxBytes);
+
+    return {
+      id: attachmentId,
+      filename: attachment.filename || "unnamed",
+      contentType: attachment.contentType || "application/octet-stream",
+      content: attachment.content,
+      size,
+    };
+  } finally {
+    lock.release();
+  }
+}
