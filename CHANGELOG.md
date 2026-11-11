@@ -5,6 +5,14 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This repository does not currently use release tags, so entries are grouped by date and major update scope.
 
+## 2026-11-11
+
+### Added
+- `download_attachment` tool — saves one attachment to a fixed download folder and returns only path, size and SHA-256 (no content in the tool result)
+- `export_email` tool — saves the complete, unmodified message as `.eml`
+- `MAIL_TRIAGE_DOWNLOAD_DIR` (default `~/mail-triage-downloads`) and `MAIL_TRIAGE_MAX_DOWNLOAD_MB` (default 25)
+- `src/download.ts` — file name sanitising, path confinement, no overwrite, 0600/0700 permissions
+
 ## 2026-08-16
 
 ### Fixed

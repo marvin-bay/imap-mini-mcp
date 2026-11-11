@@ -2,6 +2,9 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { tools, handleToolCall } from "./index.js";
 import type { ImapClient } from "../imap/index.js";
 import type { ToolEnvironment } from "../accounts.js";
+import { mkdtempSync, readFileSync, statSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 // ---------------------------------------------------------------------------
 // Mock the imap module so we don't need real IMAP connections
@@ -14,6 +17,8 @@ vi.mock("../imap/index.js", async () => {
   return {
     ...actual,
     fetchEmailContent: vi.fn(),
+    fetchEmailAttachmentBuffer: vi.fn(),
+    fetchRawEmail: vi.fn(),
     listFolders: vi.fn(),
     createFolder: vi.fn(),
     moveEmail: vi.fn(),
@@ -34,6 +39,9 @@ vi.mock("../imap/index.js", async () => {
 
 import {
   fetchEmailContent,
+  fetchEmailAttachmentBuffer,
+  fetchRawEmail,
+  TooLargeError,
   listFolders,
   createFolder,
   moveEmail,
@@ -52,6 +60,8 @@ import {
 } from "../imap/index.js";
 
 const mockFetchContent = vi.mocked(fetchEmailContent);
+const mockFetchAttachment = vi.mocked(fetchEmailAttachmentBuffer);
+const mockFetchRaw = vi.mocked(fetchRawEmail);
 const mockListFolders = vi.mocked(listFolders);
 const mockCreateFolder = vi.mocked(createFolder);
 const mockMoveEmail = vi.mocked(moveEmail);
@@ -74,6 +84,8 @@ const mockEnv: ToolEnvironment = {
   getClient: async () => mockImapClient,
   blockedFolders: ["Sicherheit"],
   maxBodyChars: 4000,
+  downloadDir: mkdtempSync(path.join(tmpdir(), "mail-triage-test-")),
+  maxDownloadBytes: 1000,
 };
 
 /** Call a tool on the mocked account "acc". */
@@ -88,8 +100,8 @@ const TEST_ID = "2026-02-01T10:00:00.<msg@example.com>";
 // ---------------------------------------------------------------------------
 
 describe("tool definitions", () => {
-  it("exposes exactly 14 tools", () => {
-    expect(tools).toHaveLength(14);
+  it("exposes exactly 16 tools", () => {
+    expect(tools).toHaveLength(16);
   });
 
   it("has the expected tool names", () => {
@@ -109,6 +121,8 @@ describe("tool definitions", () => {
       "list_emails_by_color",
       "bulk_move_by_sender_email",
       "bulk_move_by_sender_domain",
+      "download_attachment",
+      "export_email",
     ]);
   });
 
@@ -123,7 +137,12 @@ describe("tool definitions", () => {
   });
 
   it("exposes no send, delete or draft capability", () => {
-    for (const t of tools) expect(t.name).not.toMatch(/(^|_)(send|delete|expunge)(_|$)|draft|label|attachment/i);
+    for (const t of tools) expect(t.name).not.toMatch(/(^|_)(send|delete|expunge)(_|$)|draft|label/i);
+  });
+
+  it("exposes attachment access only as download to disk, never as content", () => {
+    const attachmentTools = tools.map((t) => t.name).filter((n) => /attachment/i.test(n));
+    expect(attachmentTools).toEqual(["download_attachment"]);
   });
 
   it("fetch_email_content requires id", () => {
@@ -998,5 +1017,130 @@ describe("handleToolCall — unknown tool", () => {
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("Unknown tool");
+  });
+});
+
+
+// ---------------------------------------------------------------------------
+// download_attachment / export_email
+// ---------------------------------------------------------------------------
+
+describe("download_attachment", () => {
+  beforeEach(() => {
+    mockResolveEmailId.mockResolvedValue({ uid: 7, mailbox: "INBOX" });
+  });
+
+  it("writes the file into the download folder and returns only metadata", async () => {
+    mockFetchAttachment.mockResolvedValue({
+      id: "attachment-0",
+      filename: "../../etc/Rechnung 11.PDF",
+      contentType: "application/pdf",
+      content: Buffer.from("%PDF-fake"),
+      size: 9,
+    });
+    const result = await call("download_attachment", { id: TEST_ID, attachment_id: "attachment-0" });
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(data.path.startsWith(path.join(mockEnv.downloadDir, "acc") + path.sep)).toBe(true);
+    expect(path.basename(data.path)).toMatch(/^2026-02-01_[0-9a-f]{8}_Rechnung 11\.pdf$/);
+    expect(readFileSync(data.path, "utf8")).toBe("%PDF-fake");
+    expect(statSync(data.path).mode & 0o777).toBe(0o600);
+    expect(data.filename).toBe("Rechnung 11.pdf");
+    expect(data.size).toBe(9);
+    expect(data.reused).toBe(false);
+    // content must not travel through the tool result
+    expect(result.content[0].text).not.toContain("%PDF");
+    expect(result.content[0].text).not.toContain("contentBase64");
+    expect(mockFetchAttachment).toHaveBeenCalledWith(mockImapClient, 7, "attachment-0", "INBOX", 1000);
+  });
+
+  it("is idempotent: the same download again reuses the file", async () => {
+    mockFetchAttachment.mockResolvedValue({
+      id: "attachment-1", filename: "a.txt", contentType: "text/plain",
+      content: Buffer.from("hello"), size: 5,
+    });
+    const first = JSON.parse((await call("download_attachment", { id: TEST_ID, attachment_id: "attachment-1" })).content[0].text);
+    const second = JSON.parse((await call("download_attachment", { id: TEST_ID, attachment_id: "attachment-1" })).content[0].text);
+    expect(second.path).toBe(first.path);
+    expect(second.reused).toBe(true);
+  });
+
+  it("reports too-large attachments as an error", async () => {
+    mockFetchAttachment.mockRejectedValue(new TooLargeError(5000, 1000));
+    const result = await call("download_attachment", { id: TEST_ID, attachment_id: "attachment-0" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("Zu groß");
+  });
+
+  it("errors when the attachment does not exist", async () => {
+    mockFetchAttachment.mockResolvedValue(null);
+    const result = await call("download_attachment", { id: TEST_ID, attachment_id: "nope" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("No attachment");
+  });
+
+  it("requires id and attachment_id", async () => {
+    const result = await call("download_attachment", { id: TEST_ID });
+    expect(result.isError).toBe(true);
+  });
+
+  it("refuses blocked folders without touching the mail", async () => {
+    mockFetchAttachment.mockClear();
+    const hint = await call("download_attachment", { id: TEST_ID, attachment_id: "a", mailbox: "INBOX.Sicherheit" });
+    expect(hint.isError).toBe(true);
+    expect(hint.content[0].text).toBe("Ordner gesperrt");
+
+    mockResolveEmailId.mockResolvedValue({ uid: 7, mailbox: "Sicherheit/Alt" });
+    const resolved = await call("download_attachment", { id: TEST_ID, attachment_id: "a" });
+    expect(resolved.content[0].text).toBe("Ordner gesperrt");
+    expect(mockFetchAttachment).not.toHaveBeenCalled();
+  });
+});
+
+describe("export_email", () => {
+  beforeEach(() => {
+    mockResolveEmailId.mockResolvedValue({ uid: 9, mailbox: "INBOX" });
+  });
+
+  it("writes the unmodified source as .eml and redacts codes in the file name", async () => {
+    const source = Buffer.from("From: a@b.de\r\nSubject: TAN 998877 für Rechnung\r\n\r\nBody 998877\r\n");
+    mockFetchRaw.mockResolvedValue({
+      source, subject: "TAN 998877 für Rechnung", date: "2026-02-01T10:00:00.000Z", id: TEST_ID,
+    });
+    const result = await call("export_email", { id: TEST_ID });
+    expect(result.isError).toBeUndefined();
+    const data = JSON.parse(result.content[0].text);
+
+    expect(path.extname(data.path)).toBe(".eml");
+    expect(path.basename(data.path)).toMatch(/^2026-02-01_[0-9a-f]{8}_TAN-CODE-fur-Rechnung\.eml$/);
+    expect(readFileSync(data.path)).toEqual(source); // original, not redacted
+    expect(data.size).toBe(source.length);
+    expect(result.content[0].text).not.toContain("Body");
+    expect(mockFetchRaw).toHaveBeenCalledWith(mockImapClient, 9, "INBOX", 1000);
+  });
+
+  it("reports too-large mails and missing mails as errors", async () => {
+    mockFetchRaw.mockRejectedValueOnce(new TooLargeError(9999, 1000));
+    expect((await call("export_email", { id: TEST_ID })).content[0].text).toContain("Zu groß");
+
+    mockFetchRaw.mockResolvedValueOnce(null);
+    const missing = await call("export_email", { id: TEST_ID });
+    expect(missing.isError).toBe(true);
+    expect(missing.content[0].text).toContain("No email found");
+  });
+
+  it("refuses blocked folders", async () => {
+    mockFetchRaw.mockClear();
+    mockResolveEmailId.mockResolvedValue({ uid: 9, mailbox: "INBOX/Sicherheit" });
+    const result = await call("export_email", { id: TEST_ID });
+    expect(result.content[0].text).toBe("Ordner gesperrt");
+    expect(mockFetchRaw).not.toHaveBeenCalled();
+  });
+
+  it("keeps accounts in separate subfolders", async () => {
+    mockFetchRaw.mockResolvedValue({ source: Buffer.from("x"), subject: "s", date: "", id: TEST_ID });
+    await call("export_email", { id: TEST_ID });
+    expect(readdirSync(mockEnv.downloadDir)).toContain("acc");
   });
 });

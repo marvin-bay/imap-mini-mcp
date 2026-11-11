@@ -1,5 +1,7 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { homedir } from "node:os";
+import path from "node:path";
 import { ImapClient } from "./imap/index.js";
 import { passwordEnvName, type AccountConfig } from "./config.js";
 
@@ -12,6 +14,9 @@ export interface ToolEnvironment {
   getClient(id: string): Promise<ImapClient>;
   blockedFolders: string[];
   maxBodyChars: number;
+  /** Fixed folder for downloaded attachments and exported .eml files. */
+  downloadDir: string;
+  maxDownloadBytes: number;
 }
 
 export type PasswordLookup = (account: AccountConfig) => Promise<string>;
@@ -58,6 +63,8 @@ export async function lookupPassword(
 export interface RegistryOptions {
   blockedFolders?: string[];
   maxBodyChars?: number;
+  downloadDir?: string;
+  maxDownloadBytes?: number;
   getPassword?: PasswordLookup;
   createClient?: (account: AccountConfig, password: string) => ImapClient;
 }
@@ -70,6 +77,8 @@ export interface RegistryOptions {
 export class AccountRegistry implements ToolEnvironment {
   readonly blockedFolders: string[];
   readonly maxBodyChars: number;
+  readonly downloadDir: string;
+  readonly maxDownloadBytes: number;
   private accounts = new Map<string, AccountConfig>();
   private active: { id: string; client: ImapClient } | null = null;
   private getPassword: PasswordLookup;
@@ -79,6 +88,8 @@ export class AccountRegistry implements ToolEnvironment {
     for (const a of accounts) this.accounts.set(a.id, a);
     this.blockedFolders = opts.blockedFolders ?? [];
     this.maxBodyChars = opts.maxBodyChars ?? 4000;
+    this.downloadDir = opts.downloadDir ?? path.join(homedir(), "mail-triage-downloads");
+    this.maxDownloadBytes = opts.maxDownloadBytes ?? 25 * 1024 * 1024;
     this.getPassword = opts.getPassword ?? ((a) => lookupPassword(a));
     this.createClient =
       opts.createClient ??

@@ -1,3 +1,5 @@
+import { homedir } from "node:os";
+import path from "node:path";
 import { describe, it, expect } from "vitest";
 import { loadConfig, parseFolderList, passwordEnvName } from "./config.js";
 
@@ -90,6 +92,33 @@ describe("loadConfig", () => {
     expect(loadConfig(base, reader(YAML)).maxBodyChars).toBe(4000);
     expect(loadConfig({ ...base, MAIL_TRIAGE_MAX_BODY_CHARS: "100" }, reader(YAML)).maxBodyChars).toBe(100);
     expect(() => loadConfig({ ...base, MAIL_TRIAGE_MAX_BODY_CHARS: "x" }, reader(YAML))).toThrow();
+  });
+});
+
+describe("download settings", () => {
+  const base = { MAIL_TRIAGE_ACCOUNTS: "/x" };
+
+  it("uses safe defaults", () => {
+    const c = loadConfig(base, reader(YAML));
+    expect(c.downloadDir).toBe(path.join(homedir(), "mail-triage-downloads"));
+    expect(c.maxDownloadBytes).toBe(25 * 1024 * 1024);
+  });
+
+  it("reads MAIL_TRIAGE_DOWNLOAD_DIR and MAIL_TRIAGE_MAX_DOWNLOAD_MB", () => {
+    const c = loadConfig(
+      { ...base, MAIL_TRIAGE_DOWNLOAD_DIR: "~/Mails/Anhaenge", MAIL_TRIAGE_MAX_DOWNLOAD_MB: "1.5" },
+      reader(YAML)
+    );
+    expect(c.downloadDir).toBe(path.join(homedir(), "Mails", "Anhaenge"));
+    expect(c.maxDownloadBytes).toBe(Math.floor(1.5 * 1024 * 1024));
+  });
+
+  it.each(["0", "-1", "abc"])("rejects MAIL_TRIAGE_MAX_DOWNLOAD_MB=%s", (v) => {
+    expect(() => loadConfig({ ...base, MAIL_TRIAGE_MAX_DOWNLOAD_MB: v }, reader(YAML))).toThrow(/MAX_DOWNLOAD_MB/);
+  });
+
+  it.each(["/", "~", homedir()])("rejects %s as download dir", (v) => {
+    expect(() => loadConfig({ ...base, MAIL_TRIAGE_DOWNLOAD_DIR: v }, reader(YAML))).toThrow(/DOWNLOAD_DIR/);
   });
 });
 

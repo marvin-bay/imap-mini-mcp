@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
+import { DEFAULT_DOWNLOAD_DIR, DEFAULT_MAX_DOWNLOAD_MB } from "./download.js";
 
 /** One IMAP account of the mail-triage setup. */
 export interface AccountConfig {
@@ -84,6 +85,9 @@ export function parseAccount(raw: unknown, index: number): AccountConfig {
 export interface LoadedConfig extends TriageConfig {
   blockedFolders: string[];
   maxBodyChars: number;
+  /** Absolute folder for downloaded attachments and exported .eml files. */
+  downloadDir: string;
+  maxDownloadBytes: number;
 }
 
 export const DEFAULT_BLOCKED_FOLDERS = ["Sicherheit"];
@@ -96,6 +100,26 @@ export function parseMaxBodyChars(value: string | undefined): number {
     throw new Error("MAIL_TRIAGE_MAX_BODY_CHARS muss eine positive ganze Zahl sein.");
   }
   return n;
+}
+
+export function parseMaxDownloadBytes(value: string | undefined): number {
+  if (value === undefined || value.trim() === "") return DEFAULT_MAX_DOWNLOAD_MB * 1024 * 1024;
+  const mb = Number(value);
+  if (!Number.isFinite(mb) || mb <= 0) {
+    throw new Error("MAIL_TRIAGE_MAX_DOWNLOAD_MB muss eine positive Zahl sein.");
+  }
+  return Math.floor(mb * 1024 * 1024);
+}
+
+export function parseDownloadDir(value: string | undefined): string {
+  const raw = value?.trim() || DEFAULT_DOWNLOAD_DIR;
+  const dir = path.resolve(expandHome(raw));
+  if (dir === path.parse(dir).root || dir === path.resolve(homedir())) {
+    throw new Error(
+      "MAIL_TRIAGE_DOWNLOAD_DIR darf nicht das Home- oder Wurzelverzeichnis sein, sondern muss ein eigener Ordner sein."
+    );
+  }
+  return dir;
 }
 
 /**
@@ -194,5 +218,7 @@ export function loadConfig(
     source,
     blockedFolders,
     maxBodyChars: parseMaxBodyChars(env.MAIL_TRIAGE_MAX_BODY_CHARS),
+    downloadDir: parseDownloadDir(env.MAIL_TRIAGE_DOWNLOAD_DIR),
+    maxDownloadBytes: parseMaxDownloadBytes(env.MAIL_TRIAGE_MAX_DOWNLOAD_MB),
   };
 }
