@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 This repository does not currently use release tags, so entries are grouped by date and major update scope.
 
+## 2026-11-16
+
+### Added
+- `find_emails`: `folder: "*"` searches all folders of the account. Blocked folders are never opened, Trash/Spam/Junk are skipped unless `include_junk: true`. Every hit carries its `folder`; the result also reports `searched_folders` (and `skipped_folders` for folders that could not be opened). The limit applies to the merged, date-sorted result.
+- `src/tools/find-all-folders.test.ts`
+
+### Changed
+- `find_emails` description now states that only one folder (default INBOX) is searched unless `folder: "*"` is given. Reason: mails are sorted out of INBOX quickly, so INBOX-only searches missed almost everything older than a few hours.
+
 ## 2026-11-11
 
 ### Added

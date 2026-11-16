@@ -122,6 +122,65 @@ const MAILBOX_HINT_SCHEMA = {
 const FIND_EMAILS_DEFAULT_LIMIT = 50;
 const FIND_EMAILS_MAX_LIMIT = 200;
 
+/** Value of find_emails `folder` that means "search every folder of the account". */
+const ALL_FOLDERS = "*";
+
+/** Last path segments that count as junk when searching all folders. */
+const JUNK_FOLDER_NAMES = new Set(["trash", "spam", "junk", "papierkorb"]);
+
+function isJunkFolder(path: string): boolean {
+  const last = path.normalize("NFC").toLowerCase().split(/[/.\\]/).filter(Boolean).pop();
+  return last !== undefined && JUNK_FOLDER_NAMES.has(last);
+}
+
+/**
+ * find_emails with folder "*": run the same search in every folder of the
+ * account, skipping blocked folders (silently, they are never opened) and, by
+ * default, Trash/Spam/Junk. Every hit carries its folder. The limit applies to
+ * the merged, date-sorted result. Folders that cannot be opened (for example
+ * non-selectable parents) are skipped and reported; if none can be searched the
+ * first error is thrown.
+ */
+async function findInAllFolders(
+  imapClient: ImapClient,
+  opts: any,
+  env: ToolEnvironment,
+  includeJunk: boolean
+) {
+  const folders = (await listFolders(imapClient))
+    .map((f) => f.path)
+    .filter((p) => !isBlockedFolder(p, env.blockedFolders))
+    .filter((p) => includeJunk || !isJunkFolder(p));
+
+  const merged: { id: string; subject: string; from: string; date: string; folder: string }[] = [];
+  const skipped: string[] = [];
+  let firstError: unknown;
+  for (const folder of folders) {
+    try {
+      const found = await findEmails(imapClient, { ...opts, folder });
+      for (const e of found) merged.push({ ...e, folder });
+    } catch (err) {
+      if (firstError === undefined) firstError = err;
+      skipped.push(folder);
+    }
+  }
+  if (folders.length > 0 && skipped.length === folders.length) throw firstError;
+
+  merged.sort((a, b) => {
+    const da = a.date ? new Date(a.date).getTime() : 0;
+    const db = b.date ? new Date(b.date).getTime() : 0;
+    return db - da;
+  });
+  const emails = merged.slice(0, opts.limit);
+
+  return {
+    count: emails.length,
+    searched_folders: folders.length - skipped.length,
+    ...(skipped.length > 0 ? { skipped_folders: skipped } : {}),
+    emails: redactSubjects(emails),
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Tool registry
 // ---------------------------------------------------------------------------
@@ -132,6 +191,10 @@ const registry: ToolRegistration[] = [
     description:
       "Search and filter emails. All parameters are optional — calling with no parameters " +
       "returns the most recent emails from INBOX (default 50, max 200). " +
+      "IMPORTANT: only ONE folder is searched (default INBOX). Mails are usually sorted out of " +
+      "INBOX quickly, so to find anything older than a few hours pass folder \"*\": it searches " +
+      "all folders of the account (blocked folders are skipped, Trash/Spam/Junk too unless " +
+      "include_junk is true) and adds a `folder` field to every hit. " +
       LIST_DESCRIPTION_SUFFIX,
     inputSchema: {
       type: "object",
@@ -166,7 +229,14 @@ const registry: ToolRegistration[] = [
         },
         folder: {
           type: "string",
-          description: 'Folder to search. Default: "INBOX".',
+          description:
+            'Folder to search. Default: "INBOX". Use "*" to search all folders ' +
+            "(each hit then carries its folder).",
+        },
+        include_junk: {
+          type: "boolean",
+          description:
+            'Only with folder "*": also search Trash, Spam and Junk folders. Default: false.',
         },
         limit: {
           type: "number",
@@ -202,6 +272,12 @@ const registry: ToolRegistration[] = [
         opts.limit = Math.min(limit, FIND_EMAILS_MAX_LIMIT);
       } else {
         opts.limit = FIND_EMAILS_DEFAULT_LIMIT;
+      }
+
+      if (opts.folder === ALL_FOLDERS) {
+        return jsonResult(
+          await findInAllFolders(imapClient, opts, env, args.include_junk === true)
+        );
       }
 
       assertAllowed(env, opts.folder);
