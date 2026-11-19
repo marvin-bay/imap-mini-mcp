@@ -4,7 +4,7 @@ import {
   ListToolsRequestSchema,
 } from "@modelcontextprotocol/sdk/types.js";
 import type { ToolEnvironment } from "./accounts.js";
-import { tools, handleToolCall } from "./tools/index.js";
+import { getTools, handleToolCall } from "./tools/index.js";
 
 /**
  * Create and configure the MCP server.
@@ -24,7 +24,7 @@ export function createServer(env: ToolEnvironment): Server {
 
   // List available tools
   server.setRequestHandler(ListToolsRequestSchema, async () => {
-    return { tools: [...tools] };
+    return { tools: [...getTools(env)] };
   });
 
   // Dispatch tool calls

@@ -7,6 +7,8 @@ export interface ImapConfig {
   secure: boolean;
   starttls: boolean;
   tlsRejectUnauthorized: boolean;
+  /** Open every mailbox read-only (IMAP EXAMINE): the server then refuses any change. */
+  readOnly?: boolean;
   auth: {
     user: string;
     pass: string;

@@ -180,8 +180,14 @@ export class ImapClient {
    */
   async openMailbox(path: string = "INBOX") {
     const client = await this.connect();
+    // Read-only mode opens the mailbox with EXAMINE, so even a bug in the tool
+    // layer cannot change flags, move or delete anything.
+    const open = (c: ImapFlow) =>
+      this.config.readOnly
+        ? c.getMailboxLock(path, { readOnly: true })
+        : c.getMailboxLock(path);
     try {
-      return await client.getMailboxLock(path);
+      return await open(client);
     } catch (error) {
       if (!isRetryableMailboxLockError(error)) {
         throw error;
@@ -191,7 +197,7 @@ export class ImapClient {
       // discard it and retry once with a fresh connection.
       this.client = null;
       const freshClient = await this.connect();
-      return freshClient.getMailboxLock(path);
+      return open(freshClient);
     }
   }
 }

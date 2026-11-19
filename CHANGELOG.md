@@ -14,6 +14,11 @@ This repository does not currently use release tags, so entries are grouped by d
 ### Changed
 - `find_emails` description now states that only one folder (default INBOX) is searched unless `folder: "*"` is given. Reason: mails are sorted out of INBOX quickly, so INBOX-only searches missed almost everything older than a few hours.
 
+## 2026-11-19
+
+### Added
+- `MAIL_TRIAGE_READONLY=true` — read-only instance: mutating tools are neither listed nor accepted, and all mailboxes are opened with IMAP EXAMINE
+
 ## 2026-11-11
 
 ### Added

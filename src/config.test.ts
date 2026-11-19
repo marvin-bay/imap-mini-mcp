@@ -1,7 +1,7 @@
 import { homedir } from "node:os";
 import path from "node:path";
 import { describe, it, expect } from "vitest";
-import { loadConfig, parseFolderList, passwordEnvName } from "./config.js";
+import { loadConfig, parseFolderList, parseReadOnly, passwordEnvName } from "./config.js";
 
 const YAML = `
 blocked_folders: Sicherheit, Geheim
@@ -119,6 +119,28 @@ describe("download settings", () => {
 
   it.each(["/", "~", homedir()])("rejects %s as download dir", (v) => {
     expect(() => loadConfig({ ...base, MAIL_TRIAGE_DOWNLOAD_DIR: v }, reader(YAML))).toThrow(/DOWNLOAD_DIR/);
+  });
+});
+
+describe("MAIL_TRIAGE_READONLY", () => {
+  const base = { MAIL_TRIAGE_ACCOUNTS: "/x" };
+
+  it("is off by default", () => {
+    expect(loadConfig(base, reader(YAML)).readOnly).toBe(false);
+  });
+
+  it.each(["true", "TRUE", "1", "yes", " true "])("%j switches it on", (v) => {
+    expect(parseReadOnly(v)).toBe(true);
+    expect(loadConfig({ ...base, MAIL_TRIAGE_READONLY: v }, reader(YAML)).readOnly).toBe(true);
+  });
+
+  it.each([undefined, "", "false", "0", "no"])("%j keeps it off", (v) => {
+    expect(parseReadOnly(v)).toBe(false);
+  });
+
+  it("rejects unclear values instead of silently staying writable", () => {
+    expect(() => parseReadOnly("ja")).toThrow(/MAIL_TRIAGE_READONLY/);
+    expect(() => loadConfig({ ...base, MAIL_TRIAGE_READONLY: "tru" }, reader(YAML))).toThrow();
   });
 });
 

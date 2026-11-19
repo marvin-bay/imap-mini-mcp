@@ -254,6 +254,28 @@ describe("ImapClient", () => {
     expect(lock).toBe(freshLock);
   });
 
+  it("openMailbox opens read-only (EXAMINE) when configured, also after a reconnect", async () => {
+    const client = new ImapClient({ ...testConfig, readOnly: true });
+    await client.connect();
+    const lock = { release: vi.fn() };
+    mockFlow.getMailboxLock.mockResolvedValueOnce(lock);
+    expect(await client.openMailbox("INBOX")).toBe(lock);
+    expect(mockFlow.getMailboxLock).toHaveBeenCalledWith("INBOX", { readOnly: true });
+
+    mockFlow.getMailboxLock.mockRejectedValueOnce(new Error("Connection not available"));
+    const freshFlow = createMockFlow({ getMailboxLock: vi.fn().mockResolvedValue(lock) });
+    ImapFlowMock.mockImplementation(function () { return freshFlow; });
+    await client.openMailbox("Archiv");
+    expect(freshFlow.getMailboxLock).toHaveBeenCalledWith("Archiv", { readOnly: true });
+  });
+
+  it("openMailbox keeps the plain call when read-only is off", async () => {
+    const client = new ImapClient(testConfig);
+    await client.connect();
+    await client.openMailbox("INBOX");
+    expect(mockFlow.getMailboxLock).toHaveBeenLastCalledWith("INBOX");
+  });
+
   it("openMailbox does not retry on non-connection errors", async () => {
     const client = new ImapClient(testConfig);
     await client.connect();

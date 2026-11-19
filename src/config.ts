@@ -88,6 +88,7 @@ export interface LoadedConfig extends TriageConfig {
   /** Absolute folder for downloaded attachments and exported .eml files. */
   downloadDir: string;
   maxDownloadBytes: number;
+  readOnly: boolean;
 }
 
 export const DEFAULT_BLOCKED_FOLDERS = ["Sicherheit"];
@@ -109,6 +110,14 @@ export function parseMaxDownloadBytes(value: string | undefined): number {
     throw new Error("MAIL_TRIAGE_MAX_DOWNLOAD_MB muss eine positive Zahl sein.");
   }
   return Math.floor(mb * 1024 * 1024);
+}
+
+/** MAIL_TRIAGE_READONLY: true/1/yes switch the read-only mode on; unset/false/0/no/empty off. */
+export function parseReadOnly(value: string | undefined): boolean {
+  const v = value?.trim().toLowerCase() ?? "";
+  if (v === "" || v === "false" || v === "0" || v === "no") return false;
+  if (v === "true" || v === "1" || v === "yes") return true;
+  throw new Error("MAIL_TRIAGE_READONLY muss true oder false sein.");
 }
 
 export function parseDownloadDir(value: string | undefined): string {
@@ -220,5 +229,6 @@ export function loadConfig(
     maxBodyChars: parseMaxBodyChars(env.MAIL_TRIAGE_MAX_BODY_CHARS),
     downloadDir: parseDownloadDir(env.MAIL_TRIAGE_DOWNLOAD_DIR),
     maxDownloadBytes: parseMaxDownloadBytes(env.MAIL_TRIAGE_MAX_DOWNLOAD_MB),
+    readOnly: parseReadOnly(env.MAIL_TRIAGE_READONLY),
   };
 }

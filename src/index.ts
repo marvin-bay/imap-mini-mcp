@@ -38,7 +38,11 @@ async function main() {
     maxBodyChars: config.maxBodyChars,
     downloadDir: config.downloadDir,
     maxDownloadBytes: config.maxDownloadBytes,
+    readOnly: config.readOnly,
   });
+  if (config.readOnly) {
+    safeStderrWrite("[imap-mini-mcp] read-only mode: no tool that changes a mailbox is offered.\n");
+  }
   const server = createServer(registry);
   const transport = new StdioServerTransport();
 

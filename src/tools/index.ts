@@ -919,6 +919,26 @@ export const tools = [
   })),
 ];
 
+/**
+ * Tools that change a mailbox (move, create folders, flags). They are neither
+ * listed nor accepted when the server runs with MAIL_TRIAGE_READONLY=true.
+ */
+export const MUTATING_TOOLS: ReadonlySet<string> = new Set([
+  "create_folder",
+  "move_email",
+  "star_email",
+  "unstar_email",
+  "mark_read",
+  "mark_unread",
+  "bulk_move_by_sender_email",
+  "bulk_move_by_sender_domain",
+]);
+
+/** Tool schemas for this environment: without the mutating tools in read-only mode. */
+export function getTools(env: ToolEnvironment) {
+  return env.readOnly ? tools.filter((t) => !MUTATING_TOOLS.has(t.name)) : tools;
+}
+
 /** Map-based dispatch — open for extension, closed for modification. */
 const handlerMap = new Map(
   registry.map((t) => [t.name, t.handler])
@@ -945,6 +965,10 @@ export async function handleToolCall(
   const handler = handlerMap.get(name);
   if (!handler)
     return errorResult(`Unknown tool: ${name}`);
+  if (env.readOnly && MUTATING_TOOLS.has(name))
+    return errorResult(
+      `Schreibgeschützt: "${name}" ist in dieser Instanz nicht erlaubt (MAIL_TRIAGE_READONLY).`
+    );
 
   const account = args.account;
   if (typeof account !== "string" || !account)

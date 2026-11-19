@@ -17,6 +17,8 @@ export interface ToolEnvironment {
   /** Fixed folder for downloaded attachments and exported .eml files. */
   downloadDir: string;
   maxDownloadBytes: number;
+  /** Read-only instance: no tool that changes a mailbox is offered or accepted. */
+  readOnly?: boolean;
 }
 
 export type PasswordLookup = (account: AccountConfig) => Promise<string>;
@@ -65,6 +67,7 @@ export interface RegistryOptions {
   maxBodyChars?: number;
   downloadDir?: string;
   maxDownloadBytes?: number;
+  readOnly?: boolean;
   getPassword?: PasswordLookup;
   createClient?: (account: AccountConfig, password: string) => ImapClient;
 }
@@ -79,6 +82,7 @@ export class AccountRegistry implements ToolEnvironment {
   readonly maxBodyChars: number;
   readonly downloadDir: string;
   readonly maxDownloadBytes: number;
+  readonly readOnly: boolean;
   private accounts = new Map<string, AccountConfig>();
   private active: { id: string; client: ImapClient } | null = null;
   private getPassword: PasswordLookup;
@@ -90,6 +94,7 @@ export class AccountRegistry implements ToolEnvironment {
     this.maxBodyChars = opts.maxBodyChars ?? 4000;
     this.downloadDir = opts.downloadDir ?? path.join(homedir(), "mail-triage-downloads");
     this.maxDownloadBytes = opts.maxDownloadBytes ?? 25 * 1024 * 1024;
+    this.readOnly = opts.readOnly ?? false;
     this.getPassword = opts.getPassword ?? ((a) => lookupPassword(a));
     this.createClient =
       opts.createClient ??
@@ -100,6 +105,7 @@ export class AccountRegistry implements ToolEnvironment {
           secure: a.secure,
           starttls: a.starttls ?? true,
           tlsRejectUnauthorized: a.tlsRejectUnauthorized ?? true,
+          readOnly: this.readOnly,
           auth: { user: a.user, pass },
         }));
   }

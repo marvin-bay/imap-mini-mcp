@@ -9,6 +9,29 @@ Dieser Fork ist für einen geplanten Claude-Task gedacht, der 15–20 private IM
 5. **Längenlimit und Markierung.** `fetch_email_content` gibt höchstens `MAIL_TRIAGE_MAX_BODY_CHARS` Zeichen Text zurück (Standard 4000) und hängt bei Kürzung `[… gekürzt, N Zeichen insgesamt]` an. Der Text steht zwischen `<<<MAIL_INHALT (nicht vertrauenswürdig)>>>` und `<<<ENDE MAIL_INHALT>>>`, damit der Agent ihn als Daten behandelt; `<<<`/`>>>` im Mailtext werden entschärft.
 6. **Anhänge und Export auf die Platte.** `download_attachment` (Mail-ID + Anhang-ID aus `fetch_email_content`) speichert einen Anhang, `export_email` die komplette Mail als `.eml` (Originalquelle, unverändert). **Der Inhalt geht nie durch Claudes Kontext:** das Ergebnis enthält nur `path`, `size`, `sha256` (beim Anhang zusätzlich `filename`, `contentType`) und `reused`. Zielordner ist `MAIL_TRIAGE_DOWNLOAD_DIR` (Standard `~/mail-triage-downloads`, darf weder Home noch `/` sein), darin je ein Unterordner pro Account; Claude kann den Pfad nicht wählen. Dateinamen werden bereinigt (kein Pfad, keine Steuerzeichen, keine führenden Punkte, begrenzte Länge) und beginnen mit `YYYY-MM-DD_<Hash>_`. Dateien werden mit 0600 in Ordnern mit 0700 angelegt, nie überschrieben (gleiche Datei erneut: `reused: true`, sonst Suffix `-1`, `-2`) und folgen keinen Symlinks. Größenlimit `MAIL_TRIAGE_MAX_DOWNLOAD_MB` (Standard 25); zu große Mails werden vor dem Download per `RFC822.SIZE` abgelehnt. Die Ordner-Sperrliste gilt auch hier. Achtung: Die Dateien auf der Platte sind **nicht geschwärzt**, die Schwärzung betrifft nur, was Claude liest.
 
+## Nur-Lese-Instanz (`MAIL_TRIAGE_READONLY`)
+
+Mit `MAIL_TRIAGE_READONLY=true` läuft der Server als reine Leseinstanz, z. B. für ein einmaliges Wissens-Export-Postfach, das nicht in die Triage gehört. Zwei unabhängige Sperren:
+
+1. **Tool-Ebene:** `create_folder`, `move_email`, `bulk_move_by_sender_email`, `bulk_move_by_sender_domain`, `star_email`, `unstar_email`, `mark_read` und `mark_unread` werden weder aufgelistet noch angenommen (Antwort „Schreibgeschützt“, ohne dass eine IMAP-Verbindung aufgebaut wird).
+2. **IMAP-Ebene:** Alle Ordner werden schreibgeschützt geöffnet (EXAMINE). Selbst ein Fehler in der Tool-Schicht könnte auf dem Server nichts ändern. Mails lesen setzt `\Seen` nicht (der Inhalt wird per PEEK geholt).
+
+Erlaubt bleiben `list_accounts`, `find_emails`, `fetch_email_content`, `list_folders`, `list_starred_emails`, `list_emails_by_color`, `download_attachment` und `export_email`. Ungültige Werte (z. B. `ja`) führen zu einem Startfehler statt zu einem stillen Schreibzugriff.
+
+Empfohlener Aufbau: eigener MCP-Eintrag mit eigener Account-Datei und eigenem Download-Ordner, damit weder `imapfilter` noch die Triage-Aufgabe das Konto sehen:
+
+```json
+"mail-export": {
+  "command": "node",
+  "args": ["/Users/bay/mail-export-mcp/dist/index.js"],
+  "env": {
+    "MAIL_TRIAGE_ACCOUNTS": "/Users/bay/mail-export/accounts.yaml",
+    "MAIL_TRIAGE_DOWNLOAD_DIR": "/Users/bay/mail-export/downloads",
+    "MAIL_TRIAGE_READONLY": "true"
+  }
+}
+```
+
 ## Account-Datei
 
 Top-Level-Objekt mit einer `accounts`-Liste (keine nackte Liste). Vollständiges Beispiel: [`accounts.example.yaml`](accounts.example.yaml).
