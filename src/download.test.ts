@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { mkdtempSync, readFileSync, statSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { sanitizeFilename, slugify, shortHash, sha256, writeDownload } from "./download.js";
+import { sanitizeFilename, slugify, shortHash, sha256, writeDownload, openNewFile } from "./download.js";
 
 describe("sanitizeFilename", () => {
   it("keeps normal names and lower-cases the extension", () => {
@@ -106,5 +106,37 @@ describe("writeDownload", () => {
     const r = await writeDownload(base, "k", "link.txt", Buffer.from("new"));
     expect(readFileSync(target, "utf8")).toBe("original-and-longer");
     expect(r.path).not.toBe(path.join(base, "k", "link.txt"));
+  });
+});
+
+describe("openNewFile", () => {
+  const tmp = () => mkdtempSync(path.join(tmpdir(), "dl-test-"));
+
+  it("creates an empty 0600 file inside <base>/<subdir> for streaming writes", async () => {
+    const base = tmp();
+    const f = await openNewFile(base, "uni", "ledger.csv");
+    await f.handle.write("a,b\n");
+    await f.handle.close();
+    expect(f.path).toBe(path.join(base, "uni", "ledger.csv"));
+    expect(readFileSync(f.path, "utf8")).toBe("a,b\n");
+    expect(statSync(f.path).mode & 0o777).toBe(0o600);
+    expect(statSync(path.dirname(f.path)).mode & 0o777).toBe(0o700);
+  });
+
+  it("never overwrites: a second file with the same name gets a suffix", async () => {
+    const base = tmp();
+    const a = await openNewFile(base, "uni", "x.csv");
+    const b = await openNewFile(base, "uni", "x.csv");
+    await a.handle.close(); await b.handle.close();
+    expect(path.basename(a.path)).toBe("x.csv");
+    expect(path.basename(b.path)).toBe("x-1.csv");
+  });
+
+  it("cannot escape the target folder", async () => {
+    const base = tmp();
+    const f = await openNewFile(base, "../out", "../../evil.csv");
+    await f.handle.close();
+    expect(f.path.startsWith(base + path.sep)).toBe(true);
+    expect(path.relative(base, f.path).split(path.sep)).toHaveLength(2);
   });
 });

@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, open, stat } from "node:fs/promises";
+import { mkdir, open, stat, type FileHandle } from "node:fs/promises";
 import path from "node:path";
 
 /**
@@ -12,6 +12,7 @@ import path from "node:path";
 
 export const DEFAULT_DOWNLOAD_DIR = "~/mail-triage-downloads";
 export const DEFAULT_MAX_DOWNLOAD_MB = 25;
+export const DEFAULT_INDEX_DIR = "~/mail-triage-index";
 
 const MAX_NAME_LENGTH = 100;
 
@@ -67,6 +68,46 @@ export function shortHash(...parts: string[]): string {
 
 export function sha256(buf: Buffer): string {
   return createHash("sha256").update(buf).digest("hex");
+}
+
+export interface NewFile {
+  /** Absolute path of the newly created file. */
+  path: string;
+  handle: FileHandle;
+}
+
+/**
+ * Create a new, empty file `<baseDir>/<subdir>/<fileName>` for streaming writes.
+ * Same confinement rules as writeDownload (sanitised names, 0700/0600, never
+ * overwrites: on a name clash a numeric suffix is appended). The caller must
+ * close the handle.
+ */
+export async function openNewFile(
+  baseDir: string,
+  subdir: string,
+  fileName: string
+): Promise<NewFile> {
+  const root = path.resolve(baseDir);
+  const dir = path.resolve(root, sanitizeFilename(subdir, "konto"));
+  const safeName = sanitizeFilename(fileName);
+
+  await mkdir(dir, { recursive: true, mode: 0o700 });
+
+  const ext = path.extname(safeName);
+  const stem = safeName.slice(0, safeName.length - ext.length);
+
+  for (let n = 0; n < 100; n++) {
+    const candidate = path.resolve(dir, n === 0 ? safeName : `${stem}-${n}${ext}`);
+    if (!candidate.startsWith(dir + path.sep) || !candidate.startsWith(root + path.sep)) {
+      throw new Error("Zielpfad liegt außerhalb des Zielordners.");
+    }
+    try {
+      return { path: candidate, handle: await open(candidate, "wx", 0o600) };
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== "EEXIST") throw err;
+    }
+  }
+  throw new Error("Zu viele gleichnamige Dateien im Zielordner.");
 }
 
 export interface WriteResult {

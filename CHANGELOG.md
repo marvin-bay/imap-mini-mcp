@@ -14,6 +14,14 @@ This repository does not currently use release tags, so entries are grouped by d
 ### Changed
 - `find_emails` description now states that only one folder (default INBOX) is searched unless `folder: "*"` is given. Reason: mails are sorted out of INBOX quickly, so INBOX-only searches missed almost everything older than a few hours.
 
+## 2026-11-20
+
+### Added
+- `export_index` tool — writes a CSV index (header data only) of one folder, a folder tree or all folders to `MAIL_TRIAGE_INDEX_DIR`; result holds only counts (`server_count` vs `rows`) and the path
+
+### Changed
+- Junk detection for `folder: "*"` checks every path segment and knows `Junk-E-Mail`, `Gelöschte Elemente`, `Deleted Items`; subfolders of a trash folder count as junk
+
 ## 2026-11-19
 
 ### Added

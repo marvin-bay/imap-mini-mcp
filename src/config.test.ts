@@ -122,6 +122,20 @@ describe("download settings", () => {
   });
 });
 
+describe("MAIL_TRIAGE_INDEX_DIR", () => {
+  const base = { MAIL_TRIAGE_ACCOUNTS: "/x" };
+
+  it("defaults to ~/mail-triage-index and expands ~", () => {
+    expect(loadConfig(base, reader(YAML)).indexDir).toBe(path.join(homedir(), "mail-triage-index"));
+    expect(loadConfig({ ...base, MAIL_TRIAGE_INDEX_DIR: "~/mail-export/ledger" }, reader(YAML)).indexDir)
+      .toBe(path.join(homedir(), "mail-export", "ledger"));
+  });
+
+  it.each(["/", "~"])("rejects %s", (v) => {
+    expect(() => loadConfig({ ...base, MAIL_TRIAGE_INDEX_DIR: v }, reader(YAML))).toThrow(/INDEX_DIR/);
+  });
+});
+
 describe("MAIL_TRIAGE_READONLY", () => {
   const base = { MAIL_TRIAGE_ACCOUNTS: "/x" };
 

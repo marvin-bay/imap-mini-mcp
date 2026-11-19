@@ -38,6 +38,7 @@ async function main() {
     maxBodyChars: config.maxBodyChars,
     downloadDir: config.downloadDir,
     maxDownloadBytes: config.maxDownloadBytes,
+    indexDir: config.indexDir,
     readOnly: config.readOnly,
   });
   if (config.readOnly) {

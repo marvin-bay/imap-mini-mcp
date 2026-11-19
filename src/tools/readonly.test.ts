@@ -34,6 +34,7 @@ const baseEnv = {
   maxBodyChars: 4000,
   downloadDir: mkdtempSync(path.join(tmpdir(), "mail-export-test-")),
   maxDownloadBytes: 1000,
+  indexDir: mkdtempSync(path.join(tmpdir(), "mail-index-test-")),
 };
 const readOnlyEnv: ToolEnvironment = { ...baseEnv, readOnly: true };
 const normalEnv: ToolEnvironment = { ...baseEnv, readOnly: false };
@@ -68,7 +69,7 @@ describe("read-only mode", () => {
     expect(names).toEqual(
       expect.arrayContaining([
         "list_accounts", "find_emails", "fetch_email_content", "list_folders",
-        "list_starred_emails", "list_emails_by_color", "download_attachment", "export_email",
+        "list_starred_emails", "list_emails_by_color", "download_attachment", "export_email", "export_index",
       ])
     );
     expect(names).toHaveLength(tools.length - MUTATING_TOOLS.size);

@@ -32,6 +32,19 @@ Empfohlener Aufbau: eigener MCP-Eintrag mit eigener Account-Datei und eigenem Do
 }
 ```
 
+## Mail-Index (`export_index`)
+
+Für große Ordner, die man zählen und auswerten will, ohne jede Trefferliste durch den Kontext des Agenten zu schicken. `export_index` schreibt eine CSV-Datei (nur Kopfdaten, keine Mailtexte) nach `MAIL_TRIAGE_INDEX_DIR` (Standard `~/mail-triage-index`, darin ein Unterordner pro Konto, Dateien 0600, jeder Lauf eine neue Datei `<Ordner>__<Zeitstempel>.csv`, nie überschrieben). Das Tool-Ergebnis enthält nur Zählwerte und den Pfad.
+
+- **Parameter:** `account`, `folder` (Standard `INBOX`; `*` = alle Ordner ohne gesperrte und, wenn nicht `include_junk: true`, ohne Papierkorb/Spam/Junk), `include_subfolders` (Standard aus), `after`/`before` (Ankunftsdatum auf dem Server, Tagesgenauigkeit, nicht das Date-Feld).
+- **Spalten:** `folder, uid, id` (Kennung für `fetch_email_content`/`export_email`)`, message_id, date_utc, date_berlin` (mit Offset)`, internal_date_utc, from, from_name, to, cc, subject, in_reply_to, references, list_id, auto_submitted, flags` (`seen;flagged;answered;draft;forwarded;color:<name>`)`, has_attachment, attachment_count, attachments` (JSON mit Dateiname, Typ, Größe)`, size`.
+- **Soll/Ist:** `server_count` (was der Server für die Auswahl meldet) gegen `rows` (geschriebene Zeilen), je Ordner und gesamt, dazu `folder_total` (alle Mails im Ordner) und `complete` (true, wenn beides übereinstimmt und kein Ordner ausfiel). Nicht öffenbare Ordner stehen in `skipped_folders`, gesperrte in `skipped_blocked`.
+- **Ungeschwärzt:** Betreffs stehen exakt in der Datei, weil das Ledger sie braucht. Die Datei geht nicht durch den Kontext; wer sie auswertet, gibt keine Codes oder Links daraus weiter.
+- **Dauer:** Ordner werden in Blöcken von 500 geholt. Große Auswahlen können dauern; bei einem Timeout nach `after`/`before` aufteilen.
+- Funktioniert auch in einer Nur-Lese-Instanz (reines Lesen).
+
+Die Erkennung von Papierkorb/Spam/Junk (für `*` bei `find_emails` und `export_index`) prüft jetzt jedes Pfadsegment und kennt auch `Junk-E-Mail`, `Gelöschte Elemente` und `Deleted Items`; Unterordner eines Papierkorbs zählen mit.
+
 ## Account-Datei
 
 Top-Level-Objekt mit einer `accounts`-Liste (keine nackte Liste). Vollständiges Beispiel: [`accounts.example.yaml`](accounts.example.yaml).

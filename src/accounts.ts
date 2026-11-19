@@ -17,6 +17,8 @@ export interface ToolEnvironment {
   /** Fixed folder for downloaded attachments and exported .eml files. */
   downloadDir: string;
   maxDownloadBytes: number;
+  /** Fixed folder for index (ledger) CSV files. */
+  indexDir: string;
   /** Read-only instance: no tool that changes a mailbox is offered or accepted. */
   readOnly?: boolean;
 }
@@ -67,6 +69,7 @@ export interface RegistryOptions {
   maxBodyChars?: number;
   downloadDir?: string;
   maxDownloadBytes?: number;
+  indexDir?: string;
   readOnly?: boolean;
   getPassword?: PasswordLookup;
   createClient?: (account: AccountConfig, password: string) => ImapClient;
@@ -82,6 +85,7 @@ export class AccountRegistry implements ToolEnvironment {
   readonly maxBodyChars: number;
   readonly downloadDir: string;
   readonly maxDownloadBytes: number;
+  readonly indexDir: string;
   readonly readOnly: boolean;
   private accounts = new Map<string, AccountConfig>();
   private active: { id: string; client: ImapClient } | null = null;
@@ -94,6 +98,7 @@ export class AccountRegistry implements ToolEnvironment {
     this.maxBodyChars = opts.maxBodyChars ?? 4000;
     this.downloadDir = opts.downloadDir ?? path.join(homedir(), "mail-triage-downloads");
     this.maxDownloadBytes = opts.maxDownloadBytes ?? 25 * 1024 * 1024;
+    this.indexDir = opts.indexDir ?? path.join(homedir(), "mail-triage-index");
     this.readOnly = opts.readOnly ?? false;
     this.getPassword = opts.getPassword ?? ((a) => lookupPassword(a));
     this.createClient =

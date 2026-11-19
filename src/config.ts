@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import path from "node:path";
 import { parse as parseYaml } from "yaml";
-import { DEFAULT_DOWNLOAD_DIR, DEFAULT_MAX_DOWNLOAD_MB } from "./download.js";
+import { DEFAULT_DOWNLOAD_DIR, DEFAULT_INDEX_DIR, DEFAULT_MAX_DOWNLOAD_MB } from "./download.js";
 
 /** One IMAP account of the mail-triage setup. */
 export interface AccountConfig {
@@ -88,6 +88,8 @@ export interface LoadedConfig extends TriageConfig {
   /** Absolute folder for downloaded attachments and exported .eml files. */
   downloadDir: string;
   maxDownloadBytes: number;
+  /** Absolute folder for index (ledger) CSV files written by export_index. */
+  indexDir: string;
   readOnly: boolean;
 }
 
@@ -120,15 +122,23 @@ export function parseReadOnly(value: string | undefined): boolean {
   throw new Error("MAIL_TRIAGE_READONLY muss true oder false sein.");
 }
 
-export function parseDownloadDir(value: string | undefined): string {
-  const raw = value?.trim() || DEFAULT_DOWNLOAD_DIR;
+function parseTargetDir(value: string | undefined, fallback: string, envName: string): string {
+  const raw = value?.trim() || fallback;
   const dir = path.resolve(expandHome(raw));
   if (dir === path.parse(dir).root || dir === path.resolve(homedir())) {
     throw new Error(
-      "MAIL_TRIAGE_DOWNLOAD_DIR darf nicht das Home- oder Wurzelverzeichnis sein, sondern muss ein eigener Ordner sein."
+      `${envName} darf nicht das Home- oder Wurzelverzeichnis sein, sondern muss ein eigener Ordner sein.`
     );
   }
   return dir;
+}
+
+export function parseDownloadDir(value: string | undefined): string {
+  return parseTargetDir(value, DEFAULT_DOWNLOAD_DIR, "MAIL_TRIAGE_DOWNLOAD_DIR");
+}
+
+export function parseIndexDir(value: string | undefined): string {
+  return parseTargetDir(value, DEFAULT_INDEX_DIR, "MAIL_TRIAGE_INDEX_DIR");
 }
 
 /**
@@ -229,6 +239,7 @@ export function loadConfig(
     maxBodyChars: parseMaxBodyChars(env.MAIL_TRIAGE_MAX_BODY_CHARS),
     downloadDir: parseDownloadDir(env.MAIL_TRIAGE_DOWNLOAD_DIR),
     maxDownloadBytes: parseMaxDownloadBytes(env.MAIL_TRIAGE_MAX_DOWNLOAD_MB),
+    indexDir: parseIndexDir(env.MAIL_TRIAGE_INDEX_DIR),
     readOnly: parseReadOnly(env.MAIL_TRIAGE_READONLY),
   };
 }

@@ -26,6 +26,7 @@ const env: ToolEnvironment = {
   maxBodyChars: 4000,
   downloadDir: mkdtempSync(path.join(tmpdir(), "mail-triage-test-")),
   maxDownloadBytes: 1000,
+  indexDir: mkdtempSync(path.join(tmpdir(), "mail-index-test-")),
 };
 
 function call(args: Record<string, unknown> = {}) {

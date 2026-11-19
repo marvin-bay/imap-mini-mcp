@@ -11,7 +11,11 @@ import type { ToolEnvironment } from "../accounts.js";
 import { formatBody } from "../body.js";
 import { redactText } from "../redact.js";
 import { BLOCKED_MESSAGE, isBlockedFolder } from "../blocked.js";
-import { sanitizeFilename, sha256, shortHash, slugify, writeDownload } from "../download.js";
+import { isJunkFolder } from "../junk.js";
+import { createHash } from "node:crypto";
+import { unlink } from "node:fs/promises";
+import { LEDGER_HEADER_LINE, exportFolderIndex, selectFolders, ALL_FOLDERS as INDEX_ALL_FOLDERS, type FolderIndexResult } from "../ledger.js";
+import { openNewFile, sanitizeFilename, sha256, shortHash, slugify, writeDownload } from "../download.js";
 import {
   fetchEmailContent,
   fetchEmailAttachmentBuffer,
@@ -124,14 +128,6 @@ const FIND_EMAILS_MAX_LIMIT = 200;
 
 /** Value of find_emails `folder` that means "search every folder of the account". */
 const ALL_FOLDERS = "*";
-
-/** Last path segments that count as junk when searching all folders. */
-const JUNK_FOLDER_NAMES = new Set(["trash", "spam", "junk", "papierkorb"]);
-
-function isJunkFolder(path: string): boolean {
-  const last = path.normalize("NFC").toLowerCase().split(/[/.\\]/).filter(Boolean).pop();
-  return last !== undefined && JUNK_FOLDER_NAMES.has(last);
-}
 
 /**
  * find_emails with folder "*": run the same search in every folder of the
@@ -892,6 +888,146 @@ const registry: ToolRegistration[] = [
         size: raw.source.length,
         sha256: sha256(raw.source),
         reused: written.reused,
+      });
+    },
+  },
+
+  {
+    name: "export_index",
+    description:
+      "Write an index of mails to a CSV file on disk (header data only, no mail bodies) so it can be " +
+      "analysed with a script instead of passing listings through the context. One row per mail. " +
+      "Columns: folder, uid, id (usable with fetch_email_content/export_email), message_id, date_utc, " +
+      "date_berlin, internal_date_utc (arrival on the server), from, from_name, to, cc, subject, " +
+      "in_reply_to, references, list_id, auto_submitted, flags (seen;flagged;answered;draft;color:<name>), " +
+      "has_attachment, attachment_count, attachments (JSON: filename, contentType, size), size. " +
+      "The file is NOT redacted (exact subjects) and is written to a fixed folder chosen by the server; " +
+      "the result contains only counts and the path: {path, rows, server_count, complete, folders:[{folder, server_count, rows, folder_total}], " +
+      "skipped_folders, skipped_blocked, first_date, last_date, sha256}. " +
+      "server_count is what the server reports for the selection, rows what was written; complete is true when they match and no folder failed. " +
+      'folder: one folder (default INBOX), or "*" for all folders (blocked folders and, unless include_junk is true, ' +
+      "Trash/Spam/Junk are left out). include_subfolders adds the subfolders of a named folder. " +
+      "after/before filter by the arrival date on the server (day granularity), not the Date header. " +
+      "Large selections can take a while: split big folders by after/before if a call times out.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ...ACCOUNT_SCHEMA,
+        folder: {
+          type: "string",
+          description: 'Folder to index. Default: "INBOX". Use "*" for all folders.',
+        },
+        include_subfolders: {
+          type: "boolean",
+          description: "Also index the subfolders of the named folder. Default: false.",
+        },
+        include_junk: {
+          type: "boolean",
+          description: 'Only with folder "*": also index Trash, Spam and Junk folders. Default: false.',
+        },
+        after: {
+          type: "string",
+          description:
+            'Only mails that arrived on the server after this time. Relative ("30m", "2h", "7d") or ISO date.',
+        },
+        before: {
+          type: "string",
+          description:
+            'Only mails that arrived on the server before this time. Relative ("30m", "2h", "7d") or ISO date.',
+        },
+      },
+      required: ["account"],
+    },
+    handler: async (imapClient, args, env) => {
+      const folder = (args.folder as string) || "INBOX";
+      const includeSubfolders = args.include_subfolders === true;
+      const includeJunk = args.include_junk === true;
+
+      const opts: { after?: Date; before?: Date } = {};
+      try {
+        if (args.after) opts.after = parseTimeParam(args.after as string);
+        if (args.before) opts.before = parseTimeParam(args.before as string);
+      } catch (err: any) {
+        return errorResult(err.message);
+      }
+
+      if (folder !== INDEX_ALL_FOLDERS) assertAllowed(env, folder);
+
+      const selection = selectFolders(await listFolders(imapClient), folder, {
+        includeSubfolders,
+        includeJunk,
+        blocked: env.blockedFolders,
+      });
+      if (!selection) return errorResult(`Folder not found: "${folder}" (see list_folders).`);
+      if (selection.folders.length === 0) return errorResult("No folders to index.");
+
+      const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "").replace("T", "-");
+      const label =
+        folder === INDEX_ALL_FOLDERS
+          ? "ALL"
+          : slugify(folder, "ordner") + (includeSubfolders ? "-sub" : "");
+      const file = await openNewFile(env.indexDir, args.account as string, `${label}__${stamp}.csv`);
+
+      const hash = createHash("sha256");
+      const sink = {
+        write: async (chunk: string) => {
+          hash.update(chunk);
+          await file.handle.write(chunk);
+        },
+      };
+
+      const results: FolderIndexResult[] = [];
+      const skipped: { folder: string; error: string }[] = [];
+      let firstError: unknown;
+      try {
+        await sink.write(LEDGER_HEADER_LINE);
+        for (const f of selection.folders) {
+          try {
+            results.push(await exportFolderIndex(imapClient, f, opts, sink));
+          } catch (err) {
+            if (firstError === undefined) firstError = err;
+            skipped.push({ folder: f, error: err instanceof Error ? err.message : String(err) });
+          }
+        }
+      } finally {
+        await file.handle.close();
+      }
+
+      if (results.length === 0) {
+        await unlink(file.path).catch(() => undefined);
+        throw firstError ?? new Error("Index konnte nicht erstellt werden.");
+      }
+
+      const rows = results.reduce((n, r) => n + r.rows, 0);
+      const serverCount = results.reduce((n, r) => n + r.server_count, 0);
+      const firsts = results.map((r) => r.first_date).filter((d): d is string => !!d).sort();
+      const lasts = results.map((r) => r.last_date).filter((d): d is string => !!d).sort();
+
+      return jsonResult({
+        path: file.path,
+        rows,
+        server_count: serverCount,
+        complete: skipped.length === 0 && rows === serverCount,
+        ...(opts.after || opts.before
+          ? {
+              filter: {
+                basis: "arrival date on the server",
+                after: opts.after?.toISOString() ?? null,
+                before: opts.before?.toISOString() ?? null,
+              },
+            }
+          : {}),
+        folders: results.map((r) => ({
+          folder: r.folder,
+          server_count: r.server_count,
+          rows: r.rows,
+          folder_total: r.folder_total,
+        })),
+        ...(skipped.length > 0 ? { skipped_folders: skipped } : {}),
+        ...(selection.skippedBlocked.length > 0 ? { skipped_blocked: selection.skippedBlocked } : {}),
+        first_date: firsts[0] ?? null,
+        last_date: lasts[lasts.length - 1] ?? null,
+        sha256: hash.digest("hex"),
       });
     },
   },

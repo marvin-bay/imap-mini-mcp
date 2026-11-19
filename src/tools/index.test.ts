@@ -86,6 +86,7 @@ const mockEnv: ToolEnvironment = {
   maxBodyChars: 4000,
   downloadDir: mkdtempSync(path.join(tmpdir(), "mail-triage-test-")),
   maxDownloadBytes: 1000,
+  indexDir: mkdtempSync(path.join(tmpdir(), "mail-index-test-")),
 };
 
 /** Call a tool on the mocked account "acc". */
@@ -100,8 +101,8 @@ const TEST_ID = "2026-02-01T10:00:00.<msg@example.com>";
 // ---------------------------------------------------------------------------
 
 describe("tool definitions", () => {
-  it("exposes exactly 16 tools", () => {
-    expect(tools).toHaveLength(16);
+  it("exposes exactly 17 tools", () => {
+    expect(tools).toHaveLength(17);
   });
 
   it("has the expected tool names", () => {
@@ -123,6 +124,7 @@ describe("tool definitions", () => {
       "bulk_move_by_sender_domain",
       "download_attachment",
       "export_email",
+      "export_index",
     ]);
   });
 
